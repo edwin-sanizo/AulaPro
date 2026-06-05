@@ -1,6 +1,9 @@
 
-<div id="reader"></div>
-<div id="resultado">Clica iniciar para escanear</div>
+<div id="reader" class="w-full"></div>
+<p class="text-center text-slate-500 mt-4">
+  Presione "Iniciar Cámara QR" para comenzar
+</p>
+<div id="resultado"></div>
 <button id="btnIniciar">Iniciar Cámara QR</button>
 
 <script>
@@ -10,7 +13,7 @@
 
   function onScanSuccess(decodedText: string) {
     const resultado = document.getElementById('resultado') as HTMLDivElement;
-    resultado.innerHTML = `✅ QR Detectado: <b>${decodedText}</b><br>Alumno encontrado!`;
+    resultado.innerHTML = `✅ QR Detectado: <b>${decodedText}</b>`;
     
     if (html5QrcodeScanner) {
       html5QrcodeScanner.pause();
@@ -38,3 +41,32 @@
   #resultado { margin-top: 20px; padding: 15px; background: white; border-radius: 8px; font-size: 18px; color: #1E3A8A; font-weight: bold; }
   button { margin-top: 15px; padding: 12px 25px; background: #10B981; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
 </style>
+
+<!-- <div id="reader" class="w-full"></div>
+
+<div id="result" class="mt-4 text-center font-semibold"></div>
+
+<script>
+  import { Html5QrcodeScanner } from "html5-qrcode";
+
+  function onScanSuccess(decodedText: string) {
+    const result = document.getElementById("result") as HTMLDivElement;
+    result.innerText =
+      `Código leído: ${decodedText}`;
+
+    console.log("QR:", decodedText);
+
+    // Aquí después enviarás los datos a Supabase
+  }
+
+  const scanner = new Html5QrcodeScanner(
+    "reader",
+    {
+      fps: 10,
+      qrbox: 250,
+    },
+    false
+  );
+
+  scanner.render(onScanSuccess);
+</script> -->
