@@ -1,0 +1,28 @@
+---
+import Layout from "../layouts/Layout.astro";
+import HeaderAsistencia from "../components/HeaderAsistencia.astro";
+
+---
+
+<Layout title="Control de Asistencia">
+  <HeaderAsistencia />
+
+  <div class="mt-6 text-center">
+    <h2 class="text-2xl font-bold">Control de Asistencia</h2>
+
+    <p class="text-slate-500 mt-2">Escanee el código QR del estudiante</p>
+  </div>
+
+  <div class="mt-6">
+    <!-- Aquí irá el lector QR -->
+  </div>
+
+  <div class="mt-6">
+    <a
+      href="/"
+      class="block w-full text-center bg-slate-600 hover:bg-slate-700 text-white py-3 rounded-xl"
+    >
+      Volver
+    </a>
+  </div>
+</Layout>

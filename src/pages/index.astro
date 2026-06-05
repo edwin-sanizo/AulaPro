@@ -1,18 +1,44 @@
----
+<!-- ---
 import QrScanner from '../components/QrScanner.astro';
+import Layout from '../layouts/Layout.astro';
+---
+<Layout>
+	<h1>AulaPro - Lector QR</h1>
+	<QrScanner />
+</Layout>
+
+<style>
+	body {
+		display: flex; flex-direction: column; align-items: center; padding: 20px; font-family: sans-serif; background: #f5f5f5;	
+	}
+	h1 { color: #1E3A8A; }
+</style> -->
+
+---
+import Layout from "../layouts/Layout.astro";
+import Header from "../components/Header.astro";
+import HeroCard from "../components/HeroCard.astro";
+import Button from "../components/Button.astro";
 ---
 
-<html lang="es">
-<head>
-  <title>AulaPro - Test QR</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body { display: flex; flex-direction: column; align-items: center; padding: 20px; font-family: sans-serif; background: #f5f5f5; }
-    h1 { color: #1E3A8A; }
-  </style>
-</head>
-<body>
-  <h1>AulaPro - Lector QR</h1>
-  <QrScanner />
-</body>
-</html>
+<Layout title="AulaPro">
+	<Header />
+
+	<div class="mt-6">
+		<HeroCard />
+	</div>
+
+	<div class="mt-6">
+		<Button
+			href="/escanear"
+			text="Llamar Lista"
+		/>
+	</div>
+
+	<div class="mt-6">
+		<Button
+			href="/revision"
+			text="Revisar Tarea"
+		/>
+	</div>
+</Layout>
