@@ -9,14 +9,28 @@ import QrScanner from "../components/QrScanner.astro";
 
   <div class="mt-6 text-center">
     <h2 class="text-2xl font-bold">Control de Asistencia</h2>
-
-    <!-- <p class="text-slate-500 mt-2">Escanee el código QR del estudiante</p> -->
+    <div id="contador" class="text-center font-semibold text-lg mt-4">
+      Asistentes: 0 / 33
+    </div>
   </div>
 
   <div class="mt-6">
     <!-- Aquí irá el lector QR -->
-     <QrScanner />
+    <QrScanner />
+
+    <div id="estado" class="mt-4 text-center">📷 Esperando QR...</div>
+
+    <div id="ultimoAlumno" class="mt-4 p-4 bg-green-50 rounded-lg text-center">
+      Ningún alumno registrado
+    </div>
   </div>
+
+  <button
+    id="btnFinalizar"
+    class="w-full mt-6 bg-red-600 text-white py-3 rounded-xl cursor-pointer"
+  >
+    Finalizar Asistencia
+  </button>
 
   <div class="mt-6">
     <a
