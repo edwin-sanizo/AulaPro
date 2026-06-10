@@ -490,9 +490,39 @@ import HeaderAsistencia from "../components/HeaderAsistencia.astro";
                 );
             }
 
-            doc.save(
-                `reporte_asistencia_${fecha}.pdf`
-            );
+            // doc.save(
+            //     `reporte_asistencia_${fecha}.pdf`
+            // );
+
+            const esIOS =
+            /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+            if (esIOS) {
+                const pdfBlob = doc.output("blob");
+
+                const url = URL.createObjectURL(pdfBlob);
+
+                window.open(url, "_blank");
+            } else {
+                doc.save(`reporte_asistencia_${fecha}.pdf`);
+            }
+
+            // const pdfBlob = doc.output("blob");
+
+            // const url = URL.createObjectURL(pdfBlob);
+
+            // const enlace = document.createElement("a");
+
+            // enlace.href = url;
+            // enlace.download = `reporte_asistencia_${fecha}.pdf`;
+
+            // document.body.appendChild(enlace);
+
+            // enlace.click();
+
+            // document.body.removeChild(enlace);
+
+            // URL.revokeObjectURL(url);
 
             if (mensaje) {
                 mensaje.className =
