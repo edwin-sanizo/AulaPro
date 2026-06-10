@@ -498,11 +498,7 @@ import HeaderAsistencia from "../components/HeaderAsistencia.astro";
             /iPad|iPhone|iPod/.test(navigator.userAgent);
 
             if (esIOS) {
-                const pdfBlob = doc.output("blob");
-
-                const url = URL.createObjectURL(pdfBlob);
-
-                window.open(url, "_blank");
+               doc.output("dataurlnewwindow");
             } else {
                 doc.save(`reporte_asistencia_${fecha}.pdf`);
             }
