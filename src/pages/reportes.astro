@@ -1,0 +1,510 @@
+---
+import Layout from "../layouts/Layout.astro";
+import HeaderAsistencia from "../components/HeaderAsistencia.astro";
+---
+
+<Layout title="Reportes">
+    <HeaderAsistencia />
+
+    <h2 class="text-2xl font-bold text-center mt-6">Reportes de Asistencia</h2>
+
+    <div class="mt-6">
+        <input type="date" id="fecha" class="w-full p-3 border rounded-xl" />
+
+        <div id="mensaje" class="hidden mt-3 p-3 rounded-xl text-center"></div>
+
+        <button
+            id="btnBuscar"
+            class="w-full mt-4 bg-blue-600 text-white py-3 rounded-xl cursor-pointer"
+        >
+            Buscar
+        </button>
+
+        <button
+            id="btnExcel"
+            class="w-full mt-4 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl cursor-pointer"
+        >
+            Exportar a Excel
+        </button>
+
+        <button
+            id="btnPdf"
+            class="w-full mt-3 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl cursor-pointer"
+        >
+            Exportar a PDF
+        </button>
+    </div>
+
+    <div id="resumen" class="hidden mt-6 p-4 bg-slate-100 rounded-xl"></div>
+
+    <div id="resultados" class="hidden mt-6 p-4 bg-slate-100 rounded-xl"></div>
+
+    <div class="mt-6">
+        <a
+            href="/administracion"
+            class="block w-full text-center bg-slate-600 text-white py-3 rounded-xl"
+        >
+            Volver
+        </a>
+    </div>
+</Layout>
+
+<script>
+    import { supabase } from "../lib/supabase";
+    import * as XLSX from "xlsx";
+    import { jsPDF } from "jspdf";
+    import autoTable from "jspdf-autotable";
+
+    function getLocalDate() {
+        const now = new Date();
+
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    }
+
+    const btnBuscar = document.getElementById("btnBuscar");
+    const btnExcel = document.getElementById("btnExcel");
+    const btnPdf = document.getElementById("btnPdf");
+
+    const fechaInput = document.getElementById("fecha") as HTMLInputElement;
+
+    fechaInput.value = getLocalDate();
+
+    btnBuscar?.addEventListener("click", async () => {
+        btnBuscar.textContent = "Buscando...";
+        btnBuscar.setAttribute("disabled", "true");
+
+        const fechaInput = document.getElementById("fecha") as HTMLInputElement;
+
+        const fecha = fechaInput.value;
+
+        const { data: asistencias } = await supabase
+            .from("attendance_historicos")
+            .select("*")
+            .eq("fecha_dia", fecha);
+
+        const { data: students } = await supabase
+            .from("students")
+            .select("codigo, nombre_completo");
+
+        const resultados = document.getElementById("resultados");
+
+        const resumen = document.getElementById("resumen");
+
+        if (!resultados || !resumen) return;
+
+        if (!asistencias || asistencias.length === 0) {
+            resultados.classList.remove("hidden");
+            resultados.innerHTML =
+                "<div>🔍 No existen registros para la fecha seleccionada</div>";
+
+            setTimeout(() => {
+                resultados.classList.add("hidden");
+            }, 2000);
+
+            resumen.classList.add("hidden");
+
+            btnBuscar.textContent = "Buscar";
+            btnBuscar.removeAttribute("disabled");
+
+            return;
+        }
+
+        const reporte = asistencias.map((a) => {
+            const alumno = students?.find((s) => s.codigo === a.student_codigo);
+
+            btnBuscar.textContent = "Buscar";
+            btnBuscar.removeAttribute("disabled");
+
+            return {
+                nombre: alumno?.nombre_completo || a.student_codigo,
+                estado: a.estado,
+            };
+        });
+
+        const presentes = reporte.filter((r) => r.estado === "Presente").length;
+
+        const retrasos = reporte.filter((r) => r.estado === "Retraso").length;
+
+        const licencias = reporte.filter((r) => r.estado === "Licencia").length;
+
+        // Calcular ausentes
+        const totalAlumnos = students?.length || 0;
+
+        const ausentes =
+            students?.filter(
+                (s) => !asistencias.some((a) => a.student_codigo === s.codigo),
+            ) || [];
+
+        const porcentaje =
+            totalAlumnos > 0
+                ? Math.round(
+                      ((presentes + retrasos + licencias) / totalAlumnos) * 100,
+                  )
+                : 0;
+
+        resultados.classList.remove("hidden");
+
+        resultados.innerHTML = `
+    <h3 class="font-bold text-lg mb-4 text-red-600">
+        ❌ Alumnos Ausentes
+    </h3>
+
+    ${
+        ausentes.length > 0
+            ? ausentes
+                  .map(
+                      (a) => `
+                <div class="border-b py-2">
+                    ${a.nombre_completo}
+                </div>
+                `,
+                  )
+                  .join("")
+            : `
+            <div class="text-green-600 font-semibold">
+                🎉 No hubo ausentes
+            </div>
+            `
+    }
+    `;
+
+        resumen.classList.remove("hidden");
+
+        resumen.innerHTML = `
+    <h3 class="font-bold text-lg mb-4">
+        📊 Resumen
+    </h3>
+
+    <div>👥 Total alumnos: ${totalAlumnos}</div>
+
+    <div class="text-green-600">
+        🟢 Presentes: ${presentes}
+    </div>
+
+    <div class="text-yellow-600">
+        🟡 Retrasos: ${retrasos}
+    </div>
+
+    <div class="text-blue-600">
+        🔵 Licencias: ${licencias}
+    </div>
+
+    <div class="text-red-600">
+        ❌ Ausentes: ${ausentes.length}
+    </div>
+
+    <div class="font-bold mt-3">
+        📈 Asistencia: ${porcentaje}%
+    </div>
+    `;
+    });
+
+    btnExcel?.addEventListener("click", async () => {
+        const fecha = (document.getElementById("fecha") as HTMLInputElement)
+            .value;
+
+        if (!fecha) {
+            alert("Seleccione una fecha");
+            return;
+        }
+
+        const { data: asistencias } = await supabase
+            .from("attendance_historicos")
+            .select("*")
+            .eq("fecha_dia", fecha);
+
+        if (!asistencias || asistencias.length === 0) {
+            alert("No existen registros para exportar");
+            return;
+        }
+
+        const { data: students } = await supabase
+            .from("students")
+            .select("codigo, nombre_completo");
+
+        const datosExcel =
+            students?.map((student) => {
+                const asistencia = asistencias.find(
+                    (a) => a.student_codigo === student.codigo,
+                );
+
+                return {
+                    Estudiante: student.nombre_completo,
+                    "Codigo Estudiante": student.codigo,
+                    Estado: asistencia?.estado || "Ausente",
+                    Fecha: fecha,
+                };
+            }) || [];
+
+        const presentes = datosExcel.filter(
+            (a) => a.Estado === "Presente",
+        ).length;
+
+        const retrasos = datosExcel.filter(
+            (a) => a.Estado === "Retraso",
+        ).length;
+
+        const licencias = datosExcel.filter(
+            (a) => a.Estado === "Licencia",
+        ).length;
+
+        const ausentes = datosExcel.filter(
+            (a) => a.Estado === "Ausente",
+        ).length;
+
+        const workbook = XLSX.utils.book_new();
+
+        // Hoja Resumen
+        const resumenData = [
+            { Concepto: "Presentes", Cantidad: presentes },
+            { Concepto: "Retrasos", Cantidad: retrasos },
+            { Concepto: "Licencias", Cantidad: licencias },
+            { Concepto: "Ausentes", Cantidad: ausentes },
+            { Concepto: "Total estudiantes", Cantidad: datosExcel.length },
+        ];
+
+        const resumenSheet = XLSX.utils.json_to_sheet(resumenData);
+
+        XLSX.utils.book_append_sheet(workbook, resumenSheet, "Resumen");
+
+        // Hoja Detalle
+        const detalleSheet = XLSX.utils.json_to_sheet(datosExcel);
+
+        XLSX.utils.book_append_sheet(workbook, detalleSheet, "Detalle");
+
+        const mensaje = document.getElementById("mensaje");
+
+        if (mensaje) {
+            mensaje.classList.remove("hidden");
+            mensaje.className =
+                "mt-3 p-3 rounded-xl text-center bg-blue-100 text-blue-700";
+
+            mensaje.textContent = "📥 Generando archivo Excel...";
+        }
+
+        XLSX.writeFile(workbook, `reporte_asistencia_${fecha}.xlsx`);
+
+        if (mensaje) {
+            mensaje.className =
+                "mt-3 p-3 rounded-xl text-center bg-green-100 text-green-700";
+
+            mensaje.textContent = "✅ Reporte Excel generado correctamente";
+
+            setTimeout(() => {
+                mensaje.classList.add("hidden");
+            }, 3000);
+        }
+    });
+
+    btnPdf?.addEventListener("click", async () => {
+        const fecha = (document.getElementById("fecha") as HTMLInputElement)
+            .value;
+
+        if (!fecha) {
+            return;
+        }
+
+        const { data: asistencias } = await supabase
+            .from("attendance_historicos")
+            .select("*")
+            .eq("fecha_dia", fecha);
+
+        if (!asistencias || asistencias.length === 0) {
+            return;
+        }
+
+        const { data: students } = await supabase
+            .from("students")
+            .select("codigo, nombre_completo");
+
+        const datosPdf =
+            students?.map((student) => {
+                const asistencia = asistencias.find(
+                    (a) => a.student_codigo === student.codigo,
+                );
+
+                return {
+                    codigo: student.codigo,
+                    nombre: student.nombre_completo,
+                    estado: asistencia?.estado || "Ausente",
+                };
+            }) || [];
+
+        const presentes = datosPdf.filter(
+            (a) => a.estado === "Presente",
+        ).length;
+
+        const retrasos = datosPdf.filter((a) => a.estado === "Retraso").length;
+
+        const licencias = datosPdf.filter(
+            (a) => a.estado === "Licencia",
+        ).length;
+
+        const ausentes = datosPdf.filter((a) => a.estado === "Ausente").length;
+
+        const mensaje = document.getElementById("mensaje");
+
+        if (mensaje) {
+            mensaje.classList.remove("hidden");
+            mensaje.className =
+                "mt-3 p-3 rounded-xl text-center bg-red-100 text-red-700";
+
+            mensaje.textContent = "📄 Generando PDF...";
+        }
+
+        // para tamaño carta
+        // const doc = new jsPDF({
+        //     orientation: "portrait",
+        //     unit: "mm",
+        //     format: "letter"
+        // });
+        
+        const doc = new jsPDF();
+
+        // =====================================
+        // LOGO DEL COLEGIO
+        // =====================================
+
+        const img = new Image();
+        img.src = "/escudocolegio.webp";
+
+        img.onload = () => {
+            doc.addImage(
+                img,
+                "WEBP",
+                15,
+                10,
+                25,
+                25
+            );
+
+            // =====================================
+            // ENCABEZADO
+            // =====================================
+
+            doc.setFontSize(18);
+            doc.setFont("helvetica", "bold");
+
+            doc.text(
+                "FEPPA SAN CALIXTO",
+                105,
+                25,
+                { align: "center" }
+            );
+
+            doc.setFontSize(14);
+
+            doc.text(
+                "Reporte de Asistencia",
+                105,
+                35,
+                { align: "center" }
+            );
+
+            doc.setFontSize(10);
+
+            doc.text(
+                `Fecha del reporte: ${fecha}`,
+                105,
+                43,
+                { align: "center" }
+            );
+
+            // =====================================
+            // RESUMEN
+            // =====================================
+
+            doc.setDrawColor(180);
+
+            doc.roundedRect(
+                15,
+                55,
+                180,
+                35,
+                3,
+                3
+            );
+
+            doc.setFontSize(12);
+            doc.setFont("helvetica", "bold");
+
+            doc.text("Resumen", 20, 60);
+
+            doc.setFont("helvetica", "normal");
+
+            doc.text(`Presentes: ${presentes}`, 20, 70);
+            doc.text(`Retrasos: ${retrasos}`, 70, 70);
+            doc.text(`Licencias: ${licencias}`, 120, 70);
+            doc.text(`Ausentes: ${ausentes}`, 20, 80);
+
+            // =====================================
+            // TABLA
+            // =====================================
+
+            autoTable(doc, {
+                startY: 105,
+
+                head: [[
+                    "Código",
+                    "Estudiante",
+                    "Estado"
+                ]],
+
+                body: datosPdf.map((alumno, index) => [
+                    alumno.codigo,
+                    alumno.nombre,
+                    alumno.estado
+                ]),
+
+                styles: {
+                    fontSize: 9
+                },
+
+                headStyles: {
+                    fillColor: [41, 128, 185]
+                }
+            });
+
+            // =====================================
+            // PIE DE PAGINA
+            // =====================================
+
+            const paginas = doc.getNumberOfPages();
+
+            for (let i = 1; i <= paginas; i++) {
+                doc.setPage(i);
+
+                doc.setFontSize(9);
+
+                doc.text(
+                    `Página ${i} de ${paginas}`,
+                    105,
+                    290,
+                    { align: "center" }
+                );
+
+                doc.text(
+                    "Sistema de Control de Asistencia",
+                    15,
+                    290
+                );
+            }
+
+            doc.save(
+                `reporte_asistencia_${fecha}.pdf`
+            );
+
+            if (mensaje) {
+                mensaje.className =
+                    "mt-3 p-3 rounded-xl text-center bg-green-100 text-green-700";
+
+                mensaje.textContent = "✅ Reporte PDF generado correctamente";
+
+                setTimeout(() => {
+                    mensaje.classList.add("hidden");
+                }, 3000);
+            }
+            
+        };
+    });
+</script>
