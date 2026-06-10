@@ -165,23 +165,23 @@ import HeaderAsistencia from "../components/HeaderAsistencia.astro";
                 </button>
             `
                 : `
-                <div class="grid grid-cols-3 gap-1">
+                <div class="flex gap-1">
                     <button
-                        class="bg-green-600 text-white px-1 py-1 rounded-lg text-xs"
+                        class="bg-green-600 text-white px-2 py-1 rounded-lg text-sm"
                         onclick="registrarEstado('${s.codigo}', 'Presente', this)"
                     >
                         Presente
                     </button>
 
                     <button
-                        class="bg-yellow-500 text-white px-1 py-1 rounded-lg text-xs"
+                        class="bg-yellow-500 text-white px-2 py-1 rounded-lg text-sm"
                         onclick="registrarEstado('${s.codigo}', 'Retraso', this)"
                     >
                         Retraso
                     </button>
 
                     <button
-                        class="bg-blue-600 text-white px-1 py-1 rounded-lg text-xs"
+                        class="bg-blue-600 text-white px-2 py-1 rounded-lg text-sm"
                         onclick="registrarEstado('${s.codigo}', 'Licencia', this)"
                     >
                         Licencia
