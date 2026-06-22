@@ -1,0 +1,143 @@
+---
+import Header from "../components/Header.astro";
+import HeroCard from "../components/HeroCard.astro";
+import Layout from "../layouts/Layout.astro";
+import { createClient } from "../lib/supabase";
+import type {Asignacion} from '../types/supabase';
+
+const user = Astro.locals.user;
+
+const supabase = createClient({
+  request: Astro.request,
+  cookies: Astro.cookies,
+});
+
+// ✅ UNA SOLA CONSULTA con JOIN
+const { data: profesor } = await supabase
+  .from("v2_teachers")
+  .select(`
+    id,
+    first_name,
+    last_name
+  `)
+  .eq("auth_user_id", user?.id)
+  .single();
+
+// ✅ UNA SOLA CONSULTA con JOIN para obtener TODAS las asignaciones del profesor
+const { data: asignaciones } = profesor
+  ? await supabase
+      .from("v2_teacher_assignments")
+      .select(`
+        id,
+        v2_courses (
+          id,
+          level,
+          parallel
+        ),
+        v2_subjects (
+          name
+        )
+      `)
+      .eq("teacher_id", profesor.id)
+  : { data: [] };
+
+// ✅ Leer el ID de la asignación seleccionada desde la URL
+const url = new URL(Astro.url);
+const assignmentId = url.searchParams.get('id');
+
+// ✅ Buscar la asignación seleccionada
+let asignacionSeleccionada: Asignacion | null = null;
+if (assignmentId) {
+  asignacionSeleccionada = (asignaciones as Asignacion[])?.find(a => String(a.id) === assignmentId) || null;
+}
+
+// ✅ Si no hay asignación seleccionada, usar la primera
+if (!asignacionSeleccionada && asignaciones && asignaciones.length > 0) {
+  return Astro.redirect(`/seleccion?id=${asignaciones[0].id}`);
+}
+
+// ✅ Si no hay asignaciones, redirigir al dashboard
+if (!asignacionSeleccionada) {
+  return Astro.redirect('/dashboard?error=sin-asignacion');
+}
+
+// ✅ Los datos ya vienen con la estructura correcta (objeto, no array)
+// Porque Supabase devuelve un objeto cuando usas .single() en la relación
+const course = asignacionSeleccionada.v2_courses;
+const subject = asignacionSeleccionada.v2_subjects;
+
+const subjectName = subject?.name || 'Sin materia';
+const courseName = `${course?.level || ''} ${course?.parallel || ''}`.trim() || 'Sin curso';
+const teacherAssignmentId = asignacionSeleccionada.id;
+---
+
+<Layout title="Curso Seleccionado">
+  <Header />
+
+  <div class="max-w-2xl mx-auto p-6">
+    <!-- Migas de pan -->
+    <nav class="text-sm text-gray-500 mb-4">
+      <a href="/dashboard" class="hover:text-slate-700">Dashboard</a>
+      <span class="mx-2">›</span>
+      <span class="text-slate-800 font-medium">Selección</span>
+    </nav>
+
+    <!-- Info de la materia -->
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-center">
+        {subjectName}
+      </h1>
+      <p class="text-gray-500 text-center">
+        {courseName}
+      </p>
+    </div>
+
+    <!-- HeroCard -->
+    <HeroCard />
+
+    <!-- Botones de navegación -->
+    <div class="mt-8 space-y-3">
+      <a
+        href={`/gestion_v2?id=${teacherAssignmentId}`}
+        class="flex items-center justify-between bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-xl transition-all duration-200 group"
+      >
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">⚙️</span>
+          <div class="text-left">
+            <div class="font-semibold">Gestión</div>
+            <div class="text-sm text-blue-100">Tomar asistencia y gestionar clase</div>
+          </div>
+        </div>
+        <span class="text-2xl group-hover:translate-x-1 transition-transform">→</span>
+      </a>
+
+      <a
+        href={`/administracion?id=${teacherAssignmentId}`}
+        class="flex items-center justify-between bg-emerald-600 hover:bg-emerald-700 text-white p-4 rounded-xl transition-all duration-200 group"
+      >
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">📁</span>
+          <div class="text-left">
+            <div class="font-semibold">Administración</div>
+            <div class="text-sm text-emerald-100">Gestionar estudiantes y reportes</div>
+          </div>
+        </div>
+        <span class="text-2xl group-hover:translate-x-1 transition-transform">→</span>
+      </a>
+
+      <a
+        href="/dashboard"
+        class="flex items-center justify-between bg-slate-500 hover:bg-slate-600 text-white p-4 rounded-xl transition-all duration-200 group"
+      >
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">🔄</span>
+          <div class="text-left">
+            <div class="font-semibold">Cambiar Materia</div>
+            <div class="text-sm text-slate-200">Volver al dashboard</div>
+          </div>
+        </div>
+        <span class="text-2xl group-hover:translate-x-1 transition-transform">→</span>
+      </a>
+    </div>
+  </div>
+</Layout>

@@ -1,0 +1,588 @@
+---
+import Layout from "../layouts/Layout.astro";
+import HeaderMinimal from "../components/HeaderMinimal.astro";
+import { createClient } from "../lib/supabase";
+
+// 1️⃣ Obtener usuario del middleware
+const user = Astro.locals.user;
+
+// 2️⃣ Crear cliente para consultas en servidor
+const supabase = createClient({
+  request: Astro.request,
+  cookies: Astro.cookies,
+});
+
+// 3️⃣ Obtener el ID de la asignación desde la URL
+const url = new URL(Astro.url);
+const teacherAssignmentId = url.searchParams.get('id');
+
+// 4️⃣ Si no hay ID, redirigir a selección
+if (!teacherAssignmentId) {
+  return Astro.redirect('/seleccion?error=sin-asignacion');
+}
+
+const { data: profesor } = await supabase
+  .from("v2_teachers")
+  .select(`
+    id,
+    first_name,
+    last_name
+  `)
+  .eq("auth_user_id", user?.id)
+  .single();
+
+// 5️⃣ Obtener datos de la asignación, materia y curso
+const { data: asignacion } = await supabase
+  .from("v2_teacher_assignments")
+  .select(`
+    id,
+    v2_courses (
+      id,
+      level,
+      parallel
+    ),
+    v2_subjects (
+      name
+    )
+  `)
+  .eq("id", teacherAssignmentId)
+  .eq("teacher_id", profesor?.id)
+  .single();
+
+// 6️⃣ Si no existe la asignación, redirigir
+if (!asignacion) {
+  return Astro.redirect('/dashboard?error=sin-permiso');
+}
+
+// 7️⃣ Extraer datos (v2_courses y v2_subjects vienen como objetos, no arrays)
+// Este es el problema que tuviste antes: en algunas consultas vienen como arrays,
+// pero en esta vienen como objetos porque usamos .single() en la relación
+const subject = asignacion.v2_subjects as any;
+const course = asignacion.v2_courses as any;
+const subjectName = subject?.name || 'Sin materia';
+const courseName = `${course?.level || ''} ${course?.parallel || ''}`.trim() || 'Sin curso';
+
+// 8️⃣ Obtener datos del profesor para el PDF
+// const { data: profesor } = await supabase
+//   .from("v2_teachers")
+//   .select("first_name, last_name")
+//   .eq("auth_user_id", user?.id)
+//   .single();
+
+const profesorNombre = profesor ? `${profesor.first_name} ${profesor.last_name}` : 'No asignado';
+
+// 9️⃣ Pasar datos al cliente
+const initialData = {
+  teacherAssignmentId,
+  subject: subjectName,
+  course: courseName,
+  profesorNombre,
+};
+---
+
+<Layout title="Reportes V2">
+  <HeaderMinimal />
+
+  <div class="max-w-2xl mx-auto p-6">
+    <!-- Migas de pan -->
+    <nav class="text-sm text-gray-500 mb-4">
+      <a href="/dashboard" class="hover:text-slate-700">Dashboard</a>
+      <span class="mx-2">›</span>
+      <a href="/seleccion" class="hover:text-slate-700">Selección</a>
+      <span class="mx-2">›</span>
+      <a href="/administracion" class="hover:text-slate-700">Administración</a>
+      <span class="mx-2">›</span>
+      <a href="/seleccionar_reportes" class="hover:text-slate-700">Reportes</a>
+      <span class="mx-2">›</span>
+      <span class="text-slate-800 font-medium">Reporte Diario</span>
+    </nav>
+
+    <!-- ✅ Información del curso (desde el servidor) -->
+    <div class="mt-2">
+      <div class="text-3xl font-bold text-center">
+        {subjectName}
+      </div>
+      <div class="text-gray-500 text-center">
+        {courseName}
+      </div>
+    </div>
+
+    <!-- ✅ Selector de fecha -->
+    <div class="mt-6">
+      <input
+        type="date"
+        id="fecha"
+        class="w-full p-3 border rounded-xl"
+      />
+
+      <button
+        id="btnBuscar"
+        class="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl cursor-pointer transition-colors"
+      >
+        🔍 Buscar
+      </button>
+    </div>
+
+    <!-- ✅ Resumen -->
+    <div id="resumen" class="hidden mt-6 p-4 bg-slate-100 rounded-xl"></div>
+
+    <!-- ✅ Resultados (ausentes) -->
+    <div id="resultados" class="hidden mt-6 p-4 bg-slate-100 rounded-xl"></div>
+
+    <!-- ✅ Acciones del reporte -->
+    <div id="accionesReporte" class="hidden mt-4">
+      <button
+        id="btnDetalle"
+        class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl cursor-pointer transition-colors"
+      >
+        📋 Ver detalle completo
+      </button>
+    </div>
+
+    <!-- ✅ Botones de exportación -->
+    <button
+      id="btnExcel"
+      class="w-full mt-4 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl cursor-pointer transition-colors"
+    >
+      📥 Exportar Excel
+    </button>
+
+    <button
+      id="btnPdf"
+      class="w-full mt-3 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl cursor-pointer transition-colors"
+    >
+      📄 Exportar PDF
+    </button>
+
+    <div id="mensajeExportacion" class="hidden mt-3 p-3 rounded-xl text-center"></div>
+
+    <div class="mt-6">
+      <a
+        href={`/seleccionar_reportes?id=${teacherAssignmentId}`}
+        class="block w-full text-center bg-slate-600 hover:bg-slate-700 text-white py-3 rounded-xl transition-colors"
+      >
+        ← Volver
+      </a>
+    </div>
+  </div>
+</Layout>
+
+<!-- ✅ Inyectar datos al cliente -->
+<script define:vars={{ initialData }}>
+  window.__INITIAL_DATA__ = initialData;
+</script>
+
+<script>
+  import { supabase } from '../lib/supabase-client';
+  import { getLocalDate } from '../libr/fechas';
+  import * as XLSX from 'xlsx';
+  import { jsPDF } from 'jspdf';
+  import autoTable from 'jspdf-autotable';
+  import { toast } from 'sonner';
+
+  // ✅ Obtener datos iniciales
+  const { teacherAssignmentId, subject, course, profesorNombre } = (window as any).__INITIAL_DATA__;
+
+  console.log('📊 Reporte Diario - Datos iniciales:', { teacherAssignmentId, subject, course, profesorNombre });
+
+  // Elementos DOM
+  const fechaInput = document.getElementById('fecha') as HTMLInputElement | null;
+  const btnBuscar = document.getElementById('btnBuscar');
+  const btnExcel = document.getElementById('btnExcel');
+  const btnPdf = document.getElementById('btnPdf');
+  const btnDetalle = document.getElementById('btnDetalle');
+  const mensaje = document.getElementById('mensajeExportacion');
+
+  console.log('✅ Script de reportes_v2 cargado correctamente');
+console.log('🔍 teacherAssignmentId:', teacherAssignmentId);
+console.log('🔍 btnBuscar:', document.getElementById('btnBuscar'));
+
+  // ✅ Establecer fecha actual
+  if (fechaInput) {
+    fechaInput.value = getLocalDate();
+  }
+
+  // ============================================
+  // 🔍 BUSCAR ASISTENCIA
+  // ============================================
+  btnBuscar?.addEventListener('click', async () => {
+    btnBuscar.textContent = '🔍 Buscando...';
+    btnBuscar.setAttribute('disabled', 'true');
+
+    const fecha = fechaInput?.value;
+
+    if (!fecha) {
+      btnBuscar.textContent = '🔍 Buscar';
+      btnBuscar.removeAttribute('disabled');
+      return;
+    }
+
+    try {
+      // Buscar sesión
+      const { data: session } = await supabase
+        .from('v2_attendance_sessions')
+        .select('*')
+        .eq('teacher_assignment_id', teacherAssignmentId)
+        .eq('session_date', fecha)
+        .maybeSingle();
+
+      const resumen = document.getElementById('resumen');
+      const resultados = document.getElementById('resultados');
+      const accionesReporte = document.getElementById('accionesReporte');
+
+      if (!session) {
+        if (resumen) {
+          resumen.classList.remove('hidden');
+          resumen.innerHTML = `
+            <div class="text-amber-600 font-semibold">
+              📅 No se registró asistencia en la fecha seleccionada
+              <div class="mt-2 text-sm">
+                Seleccione otra fecha e intente nuevamente.
+              </div>
+            </div>
+          `;
+        }
+        if (resultados) resultados.classList.add('hidden');
+        if (accionesReporte) accionesReporte.classList.add('hidden');
+
+        btnBuscar.textContent = '🔍 Buscar';
+        btnBuscar.removeAttribute('disabled');
+        return;
+      }
+
+      // Guardar en localStorage para el detalle
+      localStorage.setItem('report_session_id', session.id);
+      localStorage.setItem('report_date', fecha);
+
+      // Obtener asistencias
+      const { data: asistencias } = await supabase
+        .from('v2_attendance')
+        .select('*')
+        .eq('session_id', session.id);
+
+      // Obtener estudiantes del curso
+      const { data: asignacion } = await supabase
+        .from('v2_teacher_assignments')
+        .select('course_id')
+        .eq('id', teacherAssignmentId)
+        .single();
+
+      const { data: estudiantes } = await supabase
+        .from('v2_students')
+        .select('*')
+        .eq('course_id', asignacion?.course_id);
+
+      // Calcular estadísticas
+      const presentes = asistencias?.filter(a => a.status === 'Presente').length || 0;
+      const retrasos = asistencias?.filter(a => a.status === 'Retraso').length || 0;
+      const licencias = asistencias?.filter(a => a.status === 'Licencia').length || 0;
+      const asistentes = presentes + retrasos;
+
+      const ausentes = estudiantes?.filter(
+        estudiante => !asistencias?.some(
+          asistencia => asistencia.student_id === estudiante.id
+        )
+      ) || [];
+
+      // Mostrar resumen
+      if (resumen) {
+        resumen.classList.remove('hidden');
+        resumen.innerHTML = `
+          <h3 class="font-bold text-lg mb-4">📊 Resumen</h3>
+          <div>👥 Total estudiantes: ${estudiantes?.length || 0}</div>
+          <div class="text-green-600">🟢 Presentes: ${presentes}</div>
+          <div class="text-yellow-600">🟡 Retrasos: ${retrasos}</div>
+          <div class="text-blue-600">🔵 Licencias: ${licencias}</div>
+          <div class="font-semibold">✅ Asistentes: ${asistentes}</div>
+          <div class="text-red-600">❌ Ausentes: ${ausentes.length}</div>
+        `;
+      }
+
+      // Mostrar lista de ausentes
+      if (resultados) {
+        resultados.classList.remove('hidden');
+        resultados.innerHTML = `
+          <h3 class="font-bold text-lg mb-4 text-red-600">❌ Lista de Ausentes</h3>
+          ${ausentes.length
+            ? ausentes.map((alumno, index) => `
+                <div class="border-b py-2">
+                  ${index + 1}. ${alumno.first_name} ${alumno.last_name}
+                </div>
+              `).join('')
+            : `<div class="text-green-600 font-semibold">🎉 No hubo ausentes</div>`
+          }
+        `;
+      }
+
+      // Mostrar acciones del reporte
+      if (accionesReporte) {
+        accionesReporte.classList.remove('hidden');
+      }
+
+    } catch (error) {
+      console.error('Error al buscar:', error);
+    } finally {
+      btnBuscar.textContent = '🔍 Buscar';
+      btnBuscar.removeAttribute('disabled');
+    }
+  });
+
+  // ============================================
+  // 📥 EXPORTAR EXCEL
+  // ============================================
+  btnExcel?.addEventListener('click', async () => {
+    if (mensaje) {
+      mensaje.classList.remove('hidden');
+      mensaje.className = 'mt-3 p-3 rounded-xl text-center bg-blue-100 text-blue-700';
+      mensaje.textContent = '📊 Generando archivo Excel...';
+    }
+
+    const fecha = fechaInput?.value;
+
+    if (!fecha) {
+      if (mensaje) {
+        mensaje.className = 'mt-3 p-3 rounded-xl text-center bg-red-100 text-red-700';
+        mensaje.textContent = '❌ Seleccione una fecha primero';
+        setTimeout(() => mensaje.classList.add('hidden'), 3000);
+      }
+      return;
+    }
+
+    try {
+      const { data: session } = await supabase
+        .from('v2_attendance_sessions')
+        .select('*')
+        .eq('teacher_assignment_id', teacherAssignmentId)
+        .eq('session_date', fecha)
+        .maybeSingle();
+
+      if (!session) {
+        if (mensaje) {
+          mensaje.className = 'mt-3 p-3 rounded-xl text-center bg-amber-100 text-amber-700';
+          mensaje.textContent = '📅 No existen registros para la fecha seleccionada';
+          setTimeout(() => mensaje.classList.add('hidden'), 3000);
+        }
+        return;
+      }
+
+      const { data: asistencias } = await supabase
+        .from('v2_attendance')
+        .select('*')
+        .eq('session_id', session.id);
+
+      const { data: asignacion } = await supabase
+        .from('v2_teacher_assignments')
+        .select('course_id')
+        .eq('id', teacherAssignmentId)
+        .single();
+
+      const { data: estudiantes } = await supabase
+        .from('v2_students')
+        .select('*')
+        .eq('course_id', asignacion?.course_id);
+
+      const fechaBonita = fecha?.split('-').reverse().join('/');
+
+      const datosExcel = estudiantes?.map((student) => {
+        const asistencia = asistencias?.find(a => a.student_id === student.id);
+        return {
+          Estudiante: `${student.first_name} ${student.last_name}`,
+          'Código Estudiante': student.code,
+          Estado: asistencia?.status || 'Ausente',
+          Fecha: fechaBonita,
+          Materia: subject,
+          Curso: course
+        };
+      }) || [];
+
+      const presentes = asistencias?.filter(a => a.status === 'Presente').length || 0;
+      const retrasos = asistencias?.filter(a => a.status === 'Retraso').length || 0;
+      const licencias = asistencias?.filter(a => a.status === 'Licencia').length || 0;
+      const asistentes = presentes + retrasos;
+
+      const ausentes = estudiantes?.filter(
+        student => !asistencias?.some(a => a.student_id === student.id)
+      ) || [];
+
+      const resumenData = [
+        { Concepto: 'Presentes', Cantidad: presentes },
+        { Concepto: 'Retrasos', Cantidad: retrasos },
+        { Concepto: 'Licencias', Cantidad: licencias },
+        { Concepto: 'Asistentes', Cantidad: asistentes },
+        { Concepto: 'Ausentes', Cantidad: ausentes.length },
+        { Concepto: 'Total estudiantes', Cantidad: estudiantes?.length || 0 }
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      const resumenSheet = XLSX.utils.json_to_sheet(resumenData);
+      const detalleSheet = XLSX.utils.json_to_sheet(datosExcel);
+
+      XLSX.utils.book_append_sheet(workbook, resumenSheet, 'Resumen');
+      XLSX.utils.book_append_sheet(workbook, detalleSheet, 'Detalle');
+
+      XLSX.writeFile(workbook, `asistencia_${course}_${fecha}.xlsx`);
+
+      if (mensaje) {
+        mensaje.className = 'mt-3 p-3 rounded-xl text-center bg-green-100 text-green-700';
+        mensaje.textContent = '✅ Excel generado correctamente';
+        setTimeout(() => mensaje.classList.add('hidden'), 3000);
+      }
+    } catch (error) {
+      console.error('Error al exportar Excel:', error);
+      if (mensaje) {
+        mensaje.className = 'mt-3 p-3 rounded-xl text-center bg-red-100 text-red-700';
+        mensaje.textContent = '❌ Error al generar Excel';
+        setTimeout(() => mensaje.classList.add('hidden'), 3000);
+      }
+    }
+  });
+
+  // ============================================
+  // 📄 EXPORTAR PDF
+  // ============================================
+  btnPdf?.addEventListener('click', async () => {
+    if (mensaje) {
+      mensaje.classList.remove('hidden');
+      mensaje.className = 'mt-3 p-3 rounded-xl text-center bg-red-100 text-red-700';
+      mensaje.textContent = '📄 Generando PDF...';
+    }
+
+    const fecha = fechaInput?.value;
+
+    if (!fecha) {
+      if (mensaje) {
+        mensaje.className = 'mt-3 p-3 rounded-xl text-center bg-red-100 text-red-700';
+        mensaje.textContent = '❌ Seleccione una fecha primero';
+        setTimeout(() => mensaje.classList.add('hidden'), 3000);
+      }
+      return;
+    }
+
+    try {
+      const { data: session } = await supabase
+        .from('v2_attendance_sessions')
+        .select('*')
+        .eq('teacher_assignment_id', teacherAssignmentId)
+        .eq('session_date', fecha)
+        .maybeSingle();
+
+      if (!session) {
+        if (mensaje) {
+          mensaje.className = 'mt-3 p-3 rounded-xl text-center bg-amber-100 text-amber-700';
+          mensaje.textContent = '📅 No existen registros para la fecha seleccionada';
+          setTimeout(() => mensaje.classList.add('hidden'), 3000);
+        }
+        return;
+      }
+
+      const { data: asistencias } = await supabase
+        .from('v2_attendance')
+        .select('*')
+        .eq('session_id', session.id);
+
+      const { data: asignacion } = await supabase
+        .from('v2_teacher_assignments')
+        .select('course_id')
+        .eq('id', teacherAssignmentId)
+        .single();
+
+      const { data: estudiantes } = await supabase
+        .from('v2_students')
+        .select('*')
+        .eq('course_id', asignacion?.course_id);
+
+      const presentes = asistencias?.filter(a => a.status === 'Presente').length || 0;
+      const retrasos = asistencias?.filter(a => a.status === 'Retraso').length || 0;
+      const licencias = asistencias?.filter(a => a.status === 'Licencia').length || 0;
+      const asistentes = presentes + retrasos;
+
+      const ausentes = estudiantes?.filter(
+        estudiante => !asistencias?.some(
+          asistencia => asistencia.student_id === estudiante.id
+        )
+      ) || [];
+
+      const datosPdf = estudiantes?.map((student) => {
+        const asistencia = asistencias?.find(a => a.student_id === student.id);
+        return {
+          codigo: student.code,
+          nombre: `${student.first_name} ${student.last_name}`,
+          estado: asistencia?.status || 'Ausente'
+        };
+      }) || [];
+
+      const fechaBonita = fecha?.split('-').reverse().join('/');
+
+      const doc = new jsPDF();
+      const img = new Image();
+      img.src = '/escudocolegio.webp';
+
+      img.onload = () => {
+        doc.addImage(img, 'WEBP', 15, 10, 25, 25);
+        doc.setFontSize(18);
+        doc.text('FEPPA SAN CALIXTO', 105, 20, { align: 'center' });
+        doc.setFontSize(14);
+        doc.text('Reporte de Asistencia', 105, 30, { align: 'center' });
+        doc.setFontSize(10);
+        doc.text(`Profesor: ${profesorNombre}`, 50, 45);
+        doc.text(`Materia: ${subject}`, 50, 52);
+        doc.text(`Curso: ${course}`, 50, 59);
+        doc.text(`Fecha: ${fechaBonita}`, 50, 66);
+
+        doc.setFontSize(11);
+        doc.text(`Presentes: ${presentes}`, 20, 85);
+        doc.text(`Retrasos: ${retrasos}`, 70, 85);
+        doc.text(`Licencias: ${licencias}`, 120, 85);
+        doc.text(`Asistentes: ${asistentes}`, 20, 95);
+        doc.text(`Ausentes: ${ausentes.length}`, 70, 95);
+
+        autoTable(doc, {
+          startY: 110,
+          head: [['Estudiante', 'Código Estudiante', 'Estado']],
+          body: datosPdf.map((alumno) => [
+            alumno.nombre,
+            alumno.codigo,
+            alumno.estado
+          ]),
+          styles: { fontSize: 9 }
+        });
+
+        const paginas = doc.getNumberOfPages();
+        for (let i = 1; i <= paginas; i++) {
+          doc.setPage(i);
+          doc.setFontSize(9);
+          doc.text(`Página ${i} de ${paginas}`, 105, 290, { align: 'center' });
+        }
+
+        doc.save(`asistencia_${course}_${fecha}.pdf`);
+
+        if (mensaje) {
+          mensaje.className = 'mt-3 p-3 rounded-xl text-center bg-green-100 text-green-700';
+          mensaje.textContent = '✅ PDF generado correctamente';
+          setTimeout(() => mensaje.classList.add('hidden'), 3000);
+        }
+      };
+    } catch (error) {
+      console.error('Error al exportar PDF:', error);
+      if (mensaje) {
+        mensaje.className = 'mt-3 p-3 rounded-xl text-center bg-red-100 text-red-700';
+        mensaje.textContent = '❌ Error al generar PDF';
+        setTimeout(() => mensaje.classList.add('hidden'), 3000);
+      }
+    }
+  });
+
+  // ============================================
+  // 📋 VER DETALLE COMPLETO
+  // ============================================
+  btnDetalle?.addEventListener('click', () => {
+  const sessionId = localStorage.getItem('report_session_id');
+  if (sessionId) {
+    window.location.href = `/reportes_detalle_v2?sessionId=${sessionId}&assignmentId=${teacherAssignmentId}`;
+  } else {
+    toast.warning('⚠️ No hay sesión de reporte disponible', {
+      duration: 3000,
+    });
+  }
+});
+</script>

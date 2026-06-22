@@ -1,0 +1,104 @@
+---
+import Header from "../components/Header.astro";
+import Layout from "../layouts/Layout.astro";
+import { createClient } from "../lib/supabase";
+
+const user = Astro.locals.user;
+
+const supabase = createClient({
+  request: Astro.request,
+  cookies: Astro.cookies,
+});
+
+// ✅ UNA SOLA CONSULTA con JOIN
+const { data: profesor } = await supabase
+  .from("v2_teachers")
+  .select(`
+    id,
+    first_name,
+    last_name
+  `)
+  .eq("auth_user_id", user?.id)
+  .single();
+
+const { data: asignaciones } = profesor
+  ? await supabase
+      .from("v2_teacher_assignments")
+      .select(`
+        id,
+        v2_courses (
+          id,
+          level,
+          parallel
+        ),
+        v2_subjects (
+          name
+        )
+      `)
+      .eq("teacher_id", profesor.id)
+  : { data: [] };
+
+// ✅ Los datos ya vienen con la estructura correcta
+// v2_courses es un objeto, no un array (porque es .single())
+---
+
+<Layout title="Dashboard">
+  <Header />
+  
+  <div class="max-w-2xl mx-auto p-6">
+    {!profesor ? (
+      <div class="bg-red-100 text-red-700 p-4 rounded-xl">
+        <p>❌ No se encontró información del profesor</p>
+      </div>
+    ) : (
+      <div>
+        <h1 class="text-3xl font-bold">Bienvenido(a)</h1>
+        <div class="mt-4 font-semibold text-[20px]">
+          {profesor.first_name} {profesor.last_name}
+        </div>
+
+        <h2 class="text-xl font-bold mt-6">Materias asignadas</h2>
+        <p class="text-gray-500 mt-1">
+          Selecciona una materia y curso para gestionar sus asistencias y reportes.
+        </p>
+
+        <div class="mt-4 space-y-3">
+          {asignaciones && asignaciones.length > 0 ? (
+            asignaciones.map((a: any) => (
+              <button
+                class="asignacion w-full text-left bg-slate-100 hover:bg-slate-200 p-4 rounded-xl transition-colors"
+                data-id={a.id}
+                data-subject={a.v2_subjects.name}
+                data-course={`${a.v2_courses.level} ${a.v2_courses.parallel}`}
+                data-course-id={a.v2_courses.id}
+              >
+                <div class="font-semibold">
+                  {a.v2_subjects.name}
+                </div>
+                <div class="text-sm text-gray-500">
+                  {a.v2_courses.level} {a.v2_courses.parallel}
+                </div>
+              </button>
+            ))
+          ) : (
+            <div class="bg-yellow-100 text-yellow-700 p-4 rounded-xl">
+              ⚠️ No tienes materias asignadas.
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+  </div>
+</Layout>
+
+<script>
+  document.querySelectorAll('.asignacion').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      const target = event.currentTarget as HTMLButtonElement;
+      const id = target.dataset.id;
+      if (id) {
+        window.location.href = `/seleccion?id=${id}`;
+      }
+    });
+  });
+</script>

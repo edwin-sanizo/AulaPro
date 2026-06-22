@@ -1,0 +1,217 @@
+---
+import LogoutButton from "../components/LogoutButton.astro";
+import LayoutCarnets from "../layouts/LayoutCarnets.astro";
+import { createClient } from "../lib/supabase";
+import QRCode from "qrcode";
+
+// 1️⃣ Obtener usuario del middleware
+const user = Astro.locals.user;
+
+// 2️⃣ Crear cliente para consultas en servidor
+const supabase = createClient({
+  request: Astro.request,
+  cookies: Astro.cookies,
+});
+
+// 3️⃣ Obtener course_id desde la URL
+const url = new URL(Astro.url);
+const courseId = url.searchParams.get("course_id");
+
+// 4️⃣ Validar que exista course_id
+if (!courseId) {
+  return Astro.redirect("/seleccion?error=sin-curso");
+}
+
+// 5️⃣ Verificar que el curso existe
+const { data: course } = await supabase
+  .from("v2_courses")
+  .select("id, level, parallel")
+  .eq("id", courseId)
+  .single();
+
+if (!course) {
+  return Astro.redirect("/seleccion?error=curso-no-encontrado");
+}
+
+// 6️⃣ Obtener el teacher_id del usuario actual
+const { data: teacher } = await supabase
+  .from("v2_teachers")
+  .select("id")
+  .eq("auth_user_id", user?.id)
+  .single();
+
+if (!teacher) {
+  return Astro.redirect("/login?error=no-profesor");
+}
+
+// 7️⃣ Verificar que el curso esté asignado a este profesor
+const { data: assignment } = await supabase
+  .from("v2_teacher_assignments")
+  .select("id")
+  .eq("teacher_id", teacher.id)
+  .eq("course_id", courseId)
+  .maybeSingle();
+
+if (!assignment) {
+  return Astro.redirect("/dashboard?error=sin-permiso");
+}
+
+// 8️⃣ Obtener los estudiantes del curso
+const { data: students } = await supabase
+  .from("v2_students")
+  .select("*")
+  .eq("course_id", courseId)
+  .order("last_name");
+
+// 9️⃣ Generar QR para cada estudiante
+const studentsWithQR = await Promise.all(
+  (students ?? []).map(async (s) => {
+    const qr = await QRCode.toDataURL(s.code);
+    return {
+      ...s,
+      qr,
+    };
+  }),
+);
+
+// 🔟 Obtener materia asignada (para mostrar en el título)
+const { data: subjectData } = await supabase
+  .from("v2_teacher_assignments")
+  .select(`
+    v2_subjects (
+      name
+    )
+  `)
+  .eq("teacher_id", teacher.id)
+  .eq("course_id", courseId)
+  .single();
+
+const subjectName = subjectData?.v2_subjects?.[0]?.name || 'Materia no asignada';
+const courseName = `${course.level || ''} ${course.parallel || ''}`.trim() || 'Curso sin nombre';
+---
+
+<LayoutCarnets title="Generar Carnets">
+  <div class="max-w-7xl mx-auto px-4 py-6">
+    <div class="logout flex justify-end mb-4">
+      <LogoutButton />
+    </div>
+
+    <h1 class="text-3xl font-bold text-center mb-6">Carnets de Estudiantes</h1>
+
+    <!-- ✅ Información del curso (desde el servidor) -->
+    <div id="infoCurso" class="infoCurso text-center mb-6 p-4 bg-slate-100 rounded-xl">
+      <div class="font-bold text-xl">
+        Curso: {courseName}
+      </div>
+      <div class="text-slate-600">
+        Materia: {subjectName}
+      </div>
+      <div class="mt-2">
+        👥 Estudiantes: {students?.length || 0}
+      </div>
+    </div>
+
+    <!-- ✅ Botones de acción -->
+    <div class="flex flex-col items-center gap-4 mb-6">
+      <button
+        onclick="window.print()"
+        class="bg-blue-600 text-white px-6 py-3 rounded-xl hover:bg-blue-700 cursor-pointer transition-colors w-full md:w-auto"
+      >
+        🖨️ Imprimir Carnets
+      </button>
+
+      <a
+        href={`/administracion?id=${assignment.id}`}
+        class="block w-full md:w-auto text-center bg-slate-600 hover:bg-slate-700 text-white py-3 px-6 rounded-xl transition-colors"
+      >
+        ← Volver
+      </a>
+    </div>
+
+    <!-- ✅ Grid de carnets -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      {studentsWithQR.map((student) => (
+        <div class="carnet bg-white rounded-xl shadow-lg border border-slate-200 p-4 hover:shadow-xl transition-shadow">
+          <div class="text-center">
+            <img
+              src="/escudocolegio.webp"
+              alt="Escudo del Colegio"
+              class="w-16 h-16 mx-auto"
+            />
+
+            <h2 class="font-bold mt-2 uppercase text-sm">FEPPA SAN CALIXTO</h2>
+          </div>
+
+          <hr class="my-3" />
+
+          <div class="text-center mt-3">
+            <p class="text-xs text-slate-500 uppercase">Estudiante</p>
+
+            <h3 class="text-lg font-bold mt-2">
+              {student.first_name} {student.last_name}
+            </h3>
+          </div>
+
+          <div class="mt-4 text-center text-sm">
+            <p class="mt-2">
+              <strong>Código:</strong> {student.code}
+            </p>
+          </div>
+
+          <div class="flex justify-center mt-4">
+            <img src={student.qr} alt="Código QR" class="w-36 h-36" />
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <!-- ✅ Mensaje si no hay estudiantes -->
+    {studentsWithQR.length === 0 && (
+      <div class="text-center p-8 bg-yellow-100 rounded-xl mt-6">
+        <p class="text-yellow-700">⚠️ No hay estudiantes registrados en este curso.</p>
+      </div>
+    )}
+  </div>
+</LayoutCarnets>
+
+<style>
+  /* ✅ Estilos para impresión (mejorados) */
+  @media print {
+    @page {
+      size: letter;
+      margin: 10mm;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .carnet {
+      break-inside: avoid;
+      page-break-inside: avoid;
+      border: 1px solid #e2e8f0 !important;
+      box-shadow: none !important;
+    }
+
+    .infoCurso {
+      display: none;
+    }
+
+    .logout {
+      display: none;
+    }
+
+    img {
+      max-width: 100%;
+      height: auto;
+      object-fit: contain;
+    }
+
+    button,
+    a {
+      display: none !important;
+    }
+  }
+</style>

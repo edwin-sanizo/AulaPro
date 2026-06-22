@@ -1,0 +1,309 @@
+---
+import Layout from "../layouts/Layout.astro";
+import HeaderMinimal from "../components/HeaderMinimal.astro";
+import { createClient } from "../lib/supabase";
+
+// 1️⃣ Obtener usuario del middleware
+const user = Astro.locals.user;
+
+// 2️⃣ Crear cliente para consultas en servidor
+const supabase = createClient({
+  request: Astro.request,
+  cookies: Astro.cookies,
+});
+
+// 3️⃣ Obtener sessionId desde la URL
+const url = new URL(Astro.url);
+const sessionId = url.searchParams.get('sessionId');
+
+// 4️⃣ Si no hay sessionId, redirigir a escanear
+if (!sessionId) {
+  return Astro.redirect('/escanear_v2?error=sin-sesion');
+}
+
+// 5️⃣ Verificar que la sesión existe y está abierta
+const { data: sesion } = await supabase
+  .from("v2_attendance_sessions")
+  .select("id, status, teacher_assignment_id")
+  .eq("id", sessionId)
+  .single();
+
+if (!sesion || sesion.status === 'closed') {
+  return Astro.redirect('/escanear_v2?error=sesion-cerrada');
+}
+
+// 6️⃣ Obtener el course_id desde la asignación
+const { data: asignacion } = await supabase
+  .from("v2_teacher_assignments")
+  .select("course_id")
+  .eq("id", sesion.teacher_assignment_id)
+  .single();
+
+if (!asignacion || !asignacion.course_id) {
+  return Astro.redirect('/escanear_v2?error=sin-curso');
+}
+
+// 7️⃣ Obtener todos los estudiantes del curso
+const { data: estudiantes } = await supabase
+  .from("v2_students")
+  .select("id, code, first_name, last_name")
+  .eq("course_id", asignacion?.course_id)
+  .order("last_name");
+
+// 8️⃣ Obtener asistencias registradas hoy
+const { data: asistenciasHoy } = await supabase
+  .from("v2_attendance")
+  .select("student_id, status")
+  .eq("session_id", sessionId);
+
+// 9️⃣ Crear objeto con los estados de cada estudiante
+const estadosObj: Record<string, string> = {};
+asistenciasHoy?.forEach((a: any) => {
+  estadosObj[a.student_id] = a.status;
+});
+
+// 🔟 Pasar datos al cliente
+const estudiantesJSON = JSON.stringify(estudiantes || []);
+const estadosJSON = JSON.stringify(estadosObj);
+const sessionIdJSON = JSON.stringify(sessionId);
+---
+
+<Layout title="Asistencia Manual">
+  <HeaderMinimal />
+
+  <div class="max-w-2xl mx-auto p-6">
+    <h2 class="text-2xl font-bold text-center mt-6">Asistencia Manual</h2>
+
+    <div class="text-center text-sm text-gray-500 mt-2">
+      Total: {estudiantes?.length || 0} estudiantes
+    </div>
+
+    <input
+      type="text"
+      id="buscador"
+      placeholder="Buscar estudiante..."
+      class="w-full mt-4 p-3 border rounded-xl"
+    />
+
+    <div id="mensajeEstado"></div>
+
+    <div id="listaEstudiantes" class="mt-6 space-y-2"></div>
+
+    <div class="mt-6">
+      <a
+        href={`/escanear_v2?sessionId=${sessionId}`}
+        class="block w-full text-center bg-slate-600 hover:bg-slate-700 text-white py-3 rounded-xl transition-colors"
+      >
+        ← Atrás
+      </a>
+    </div>
+  </div>
+</Layout>
+
+<!-- ✅ Inyectar datos al cliente -->
+<script define:vars={{ estudiantesJSON, estadosJSON, sessionIdJSON }}>
+  window.__INITIAL_DATA__ = {
+    estudiantes: JSON.parse(estudiantesJSON),
+    estados: JSON.parse(estadosJSON),
+    sessionId: JSON.parse(sessionIdJSON)
+  };
+</script>
+
+<script>
+  import { supabase } from '../lib/supabase-client';
+
+  // ✅ Obtener datos iniciales
+  const { estudiantes: estudiantesIniciales, estados: estadosIniciales, sessionId } = (window as any).__INITIAL_DATA__;
+
+  const listaEstudiantes = document.getElementById('listaEstudiantes');
+  let todosLosEstudiantes = estudiantesIniciales || [];
+  let estadosHoy = estadosIniciales || {};
+
+  // ✅ Función para registrar estado
+  (window as any).registrarEstado = async (studentId: string, estado: string) => {
+    try {
+      // Verificar si ya existe 
+      const { data: existente } = await supabase 
+        .from('v2_attendance') 
+        .select('id')
+        .eq('session_id', sessionId)
+        .eq('student_id', studentId)
+        .maybeSingle();
+      // const response =
+      //   await fetch(
+      //     "/api/attendance",
+      //     {
+      //       method: "POST",
+      //       headers: {
+      //         "Content-Type":
+      //           "application/json"
+      //       },
+      //       body: JSON.stringify({
+      //         sessionId,
+      //         studentId,
+      //         status: estado
+      //       })
+      //     }
+      //   );
+
+      // const result =
+      //   await response.json();
+
+      // if (!response.ok) {
+
+      //   mostrarMensaje(
+      //     "❌ Error al registrar",
+      //     "error"
+      //   );
+
+      //   return;
+      // }
+
+      if (existente) {
+        // ✅ Actualizar estado existente
+        const { error } = await supabase
+          .from('v2_attendance')
+          .update({ status: estado })
+          .eq('id', existente.id);
+
+        if (error) {
+          console.error(error);
+          mostrarMensaje('❌ Error al actualizar', 'error');
+          return;
+        }
+      } else {
+        // ✅ Insertar nuevo registro
+        const { error } = await supabase
+          .from('v2_attendance')
+          .insert([{
+            session_id: sessionId,
+            student_id: studentId,
+            status: estado
+          }]);
+
+        if (error) {
+          console.error(error);
+          mostrarMensaje('❌ Error al registrar', 'error');
+          return;
+        }
+      }
+
+      // ✅ Actualizar estado local
+      estadosHoy[studentId] = estado;
+      mostrarMensaje(`✅ ${estado} registrado correctamente`, 'success');
+      mostrarEstudiantes(todosLosEstudiantes);
+
+    } catch (e) {
+      console.error(e);
+      mostrarMensaje('❌ Error al procesar', 'error');
+    }
+  };
+
+  function mostrarMensaje(texto: string, tipo: 'success' | 'error') {
+    const mensaje = document.getElementById('mensajeEstado');
+    if (!mensaje) return;
+
+    const bg = tipo === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700';
+    mensaje.innerHTML = `
+      <div class="${bg} p-3 rounded-lg mb-3">
+        ${texto}
+      </div>
+    `;
+
+    setTimeout(() => {
+      mensaje.innerHTML = '';
+    }, 3000);
+  }
+
+  function mostrarEstudiantes(estudiantes: any[], busquedaActiva: boolean = false) {
+    if (!listaEstudiantes) return;
+
+    // if (!estudiantes || estudiantes.length === 0) {
+    //   listaEstudiantes.innerHTML = `
+    //     <div class="p-4 ${busquedaActiva ? 'bg-yellow-100 text-yellow-700' : 'bg-yellow-100 text-gray-700'} rounded-xl text-center">
+    //       ${busquedaActiva ? '🔍 No se encontraron estudiantes con ese nombre o código' : '⚠️ No hay estudiantes en este curso'}
+    //     </div>
+    //   `;
+    //   return;
+    // }
+
+    listaEstudiantes.innerHTML = estudiantes
+      .map((s: any) => {
+        const estado = estadosHoy[s.id];
+        const registrado = !!estado;
+
+        return `
+          <div class="bg-white rounded-xl shadow p-4">
+            <div class="flex justify-between items-start">
+              <div>
+                <div class="font-semibold">${s.first_name} ${s.last_name}</div>
+                <div class="text-sm text-gray-500">Código: ${s.code}</div>
+              </div>
+              ${registrado ? `<span class="bg-green-200 text-green-800 px-3 py-1 rounded-full text-sm font-semibold">✔ ${estado}</span>` : ''}
+            </div>
+
+            <div class="flex gap-2 mt-3 flex-wrap">
+              <button
+                class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-lg text-sm transition-colors"
+                onclick="registrarEstado('${s.id}', 'Presente')"
+              >
+                Presente
+              </button>
+
+              <button
+                class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded-lg text-sm transition-colors"
+                onclick="registrarEstado('${s.id}', 'Retraso')"
+              >
+                Retraso
+              </button>
+
+              <button
+                class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg text-sm transition-colors"
+                onclick="registrarEstado('${s.id}', 'Licencia')"
+              >
+                Licencia
+              </button>
+
+              ${registrado ? `
+                <span class="bg-gray-200 text-gray-600 px-3 py-1 rounded-lg text-sm font-semibold">
+                  ${estado}
+                </span>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  }
+
+  // ✅ Buscador
+  const buscador = document.getElementById('buscador') as HTMLInputElement;
+  buscador?.addEventListener('input', (e) => {
+    const texto = (e.target as HTMLInputElement).value.toLowerCase().trim();
+
+    const filtrados = todosLosEstudiantes.filter(
+      (s: any) =>
+        `${s.first_name} ${s.last_name}`.toLowerCase().includes(texto) ||
+        s.code.toLowerCase().includes(texto)
+    );
+
+    // ✅ Mostrar mensaje si no hay resultados
+    const mensaje = document.getElementById('mensajeEstado');
+    if (mensaje) {
+      if (texto && filtrados.length === 0) {
+        mensaje.innerHTML = `
+          <div class="bg-red-100 text-red-700 p-3 rounded-lg mb-3">
+            ✗ Estudiante no encontrado
+          </div>
+        `;
+      } else {
+        mensaje.innerHTML = '';
+      }
+    }
+
+    mostrarEstudiantes(filtrados, texto.length > 0);
+  });
+
+  // ✅ Inicializar
+  mostrarEstudiantes(todosLosEstudiantes);
+</script>

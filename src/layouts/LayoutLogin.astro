@@ -8,16 +8,15 @@ const {title} = Astro.props;
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width" />
-		<!-- <link rel="icon" type="image/svg+xml" href="/favicon.svg" /> -->
-		<link rel="icon" href="/escudocolegio.ico" />
-		<!-- <meta name="generator" content={Astro.generator} /> -->
+		<link rel="icon" href="/educontrolqr.ico" />
 		<title>{title}</title>
 	</head>
-	<body class="bg-slate-100 min-h-screen">
+	<body style="background-color: #f8fafc;" class="min-h-screen">
 		<main class="min-h-screen flex items-center justify-center p-4">
-    		<div class="w-full max-w-md bg-white rounded-2xl shadow-xl p-6">
+			<!-- Contenedor principal con el diseño mejorado -->
+			<div class="w-full max-w-md bg-white shadow-2xl rounded-3xl p-8 border border-gray-100 transform transition-all duration-500 hover:shadow-3xl">
 				<slot />
-				<Toaster client:only="react" />
+				<Toaster client:only="react"/>
 			</div>
 		</main>	
 	</body>

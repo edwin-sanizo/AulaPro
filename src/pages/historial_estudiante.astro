@@ -1,0 +1,277 @@
+---
+import Layout from "../layouts/Layout.astro";
+import HeaderMinimal from "../components/HeaderMinimal.astro";
+import { createClient } from "../lib/supabase";
+
+// 1️⃣ Obtener usuario del middleware
+const user = Astro.locals.user;
+
+// 2️⃣ Crear cliente para consultas en servidor
+const supabase = createClient({
+  request: Astro.request,
+  cookies: Astro.cookies,
+});
+
+// 3️⃣ Obtener el ID de la asignación desde la URL
+const url = new URL(Astro.url);
+const teacherAssignmentId = url.searchParams.get('id');
+
+// 4️⃣ Si no hay ID, redirigir a selección
+if (!teacherAssignmentId) {
+  return Astro.redirect('/seleccion?error=sin-asignacion');
+}
+
+const { data: profesor } = await supabase
+  .from("v2_teachers")
+  .select(`
+    id,
+    first_name,
+    last_name
+  `)
+  .eq("auth_user_id", user?.id)
+  .single();
+
+// 5️⃣ Obtener datos de la asignación, materia y curso
+const { data: asignacion } = await supabase
+  .from("v2_teacher_assignments")
+  .select(`
+    id,
+    course_id,
+    v2_courses (
+      level,
+      parallel
+    ),
+    v2_subjects (
+      name
+    )
+  `)
+  .eq("id", teacherAssignmentId)
+  .eq("teacher_id", profesor?.id)
+  .single();
+
+// 6️⃣ Si no existe la asignación, redirigir
+if (!asignacion) {
+  return Astro.redirect('/dashboard?error=sin-permiso');
+}
+
+// 7️⃣ Extraer datos (v2_courses y v2_subjects vienen como objetos)
+const subject = asignacion.v2_subjects as any;
+const course = asignacion.v2_courses as any;
+const subjectName = subject?.name || 'Sin materia';
+const courseName = `${course?.level || ''} ${course?.parallel || ''}`.trim() || 'Sin curso';
+
+// 8️⃣ Obtener estudiantes del curso
+const { data: estudiantes } = await supabase
+  .from("v2_students")
+  .select("*")
+  .eq("course_id", asignacion.course_id)
+  .order("last_name");
+
+// 9️⃣ Pasar datos al cliente
+const initialData = {
+  teacherAssignmentId,
+  subject: subjectName,
+  course: courseName,
+  estudiantes: estudiantes || [],
+};
+---
+
+<Layout title="Historial por Estudiante">
+  <HeaderMinimal />
+
+  <div class="max-w-2xl mx-auto p-6">
+    <!-- Migas de pan -->
+    <nav class="text-sm text-gray-500 mb-4">
+      <a href="/dashboard" class="hover:text-slate-700">Dashboard</a>
+      <span class="mx-2">›</span>
+      <a href="/seleccion" class="hover:text-slate-700">Selección</a>
+      <span class="mx-2">›</span>
+      <a href="/administracion" class="hover:text-slate-700">Administración</a>
+      <span class="mx-2">›</span>
+      <a href="/seleccionar_reportes" class="hover:text-slate-700">Reportes</a>
+      <span class="mx-2">›</span>
+      <span class="text-slate-800 font-medium">Historial por Estudiante</span>
+    </nav>
+
+    <!-- ✅ Información del curso (desde el servidor) -->
+    <div class="mt-2">
+      <div class="text-3xl font-bold text-center">
+        {subjectName}
+      </div>
+      <div class="text-gray-500 text-center">
+        {courseName}
+      </div>
+    </div>
+
+    <!-- ✅ Selector de estudiante -->
+    <select id="estudiante" class="w-full mt-4 p-3 border rounded-xl">
+      <option value="">Seleccione un estudiante</option>
+      {estudiantes?.map((e: any) => (
+        <option value={e.id}>
+          {e.first_name} {e.last_name} ({e.code})
+        </option>
+      ))}
+    </select>
+
+    <button
+      id="btnBuscar"
+      class="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl cursor-pointer transition-colors"
+    >
+      🔍 Buscar
+    </button>
+
+    <!-- ✅ Resultado -->
+    <div id="resultado" class="hidden mt-6 p-4 bg-slate-100 rounded-xl"></div>
+
+    <div class="mt-8">
+      <a
+        href={`/seleccionar_reportes?id=${teacherAssignmentId}`}
+        class="block w-full text-center bg-slate-600 hover:bg-slate-700 text-white py-3 rounded-xl transition-colors"
+      >
+        ← Volver
+      </a>
+    </div>
+  </div>
+</Layout>
+
+<!-- ✅ Inyectar datos al cliente -->
+<script define:vars={{ initialData }}>
+  window.__INITIAL_DATA__ = initialData;
+</script>
+
+<script>
+  import { supabase } from '../lib/supabase-client';
+
+  // ✅ Obtener datos iniciales
+  const { teacherAssignmentId, subject, course, estudiantes } = (window as any).__INITIAL_DATA__;
+
+  console.log('📚 Historial - Datos iniciales:', { teacherAssignmentId, subject, course, estudiantes: estudiantes?.length });
+
+  const select = document.getElementById('estudiante') as HTMLSelectElement;
+  const btnBuscar = document.getElementById('btnBuscar');
+  const resultado = document.getElementById('resultado');
+
+  // ✅ Limpiar resultado al cambiar de estudiante
+  select?.addEventListener('change', () => {
+    if (resultado) {
+      resultado.classList.add('hidden');
+      resultado.innerHTML = '';
+    }
+  });
+
+  // ✅ Buscar historial
+  btnBuscar?.addEventListener('click', async () => {
+    btnBuscar.textContent = '📚 Generando historial...';
+    btnBuscar.setAttribute('disabled', 'true');
+
+    try {
+      // Obtener estudiante seleccionado
+      const studentId = select?.value;
+      const estudianteSeleccionado = estudiantes?.find((e: any) => e.id === studentId);
+
+      // Validar que se haya seleccionado un estudiante
+      if (!studentId) {
+        if (resultado) {
+          resultado.classList.remove('hidden');
+          resultado.innerHTML = `
+            <div class="text-amber-600 font-semibold">
+              ⚠️ Seleccione un estudiante
+            </div>
+          `;
+        }
+        btnBuscar.textContent = '🔍 Buscar';
+        btnBuscar.removeAttribute('disabled');
+        return;
+      }
+
+      // Obtener historial de asistencia del estudiante
+      const { data: historial } = await supabase
+        .from('v2_attendance')
+        .select(`
+          status,
+          session_id
+        `)
+        .eq('student_id', studentId);
+
+      // Obtener todas las sesiones del curso
+      const { data: sesionesCurso } = await supabase
+        .from('v2_attendance_sessions')
+        .select(`
+          id,
+          session_date
+        `)
+        .eq('teacher_assignment_id', teacherAssignmentId)
+        .order('session_date', { ascending: false });
+
+      // Construir historial completo
+      const historialCompleto = sesionesCurso?.map((sesion: any) => {
+        const asistencia = historial?.find((h: any) => h.session_id === sesion.id);
+        return {
+          fecha: sesion.session_date,
+          estado: asistencia?.status || 'Ausente'
+        };
+      }) || [];
+
+      // Calcular estadísticas
+      const presentes = historialCompleto.filter((h: any) => h.estado === 'Presente').length;
+      const retrasos = historialCompleto.filter((h: any) => h.estado === 'Retraso').length;
+      const licencias = historialCompleto.filter((h: any) => h.estado === 'Licencia').length;
+      const asistencias = presentes + retrasos;
+      const totalSesiones = sesionesCurso?.length || 0;
+      const ausencias = totalSesiones - (presentes + retrasos + licencias);
+      const porcentaje = totalSesiones > 0 ? Math.round((asistencias / totalSesiones) * 100) : 0;
+
+      // Ordenar por fecha (más reciente primero)
+      historialCompleto.sort((a: any, b: any) =>
+        new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
+      );
+
+      // Mostrar resultado
+      if (resultado) {
+        resultado.classList.remove('hidden');
+        resultado.innerHTML = `
+          <div class="font-bold text-lg mb-4">
+            👨‍🎓 ${estudianteSeleccionado?.first_name} ${estudianteSeleccionado?.last_name}
+          </div>
+
+          <h3 class="font-bold text-lg mb-4">📋 Historial</h3>
+
+          ${historialCompleto.length
+            ? historialCompleto.map((h: any) => `
+                <div class="border-b py-2 flex justify-between">
+                  <span>${h.fecha.split('-').reverse().join('/')}</span>
+                  <span>${h.estado}</span>
+                </div>
+              `).join('')
+            : `<div class="text-gray-500">No existen registros</div>`
+          }
+
+          <hr class="my-4">
+
+          <h3 class="font-bold text-lg mb-4">📊 Resumen</h3>
+
+          <div class="text-green-600">🟢 Presentes: ${presentes}</div>
+          <div class="text-yellow-600">🟡 Retrasos: ${retrasos}</div>
+          <div class="text-blue-600">🔵 Licencias: ${licencias}</div>
+          <div class="text-red-600">❌ Ausencias: ${ausencias}</div>
+          <div class="font-semibold mt-2">✅ Asistencias: ${asistencias}</div>
+          <div class="font-bold mt-2">📈 Porcentaje: ${porcentaje}%</div>
+        `;
+      }
+
+    } catch (error) {
+      console.error('Error al buscar historial:', error);
+      if (resultado) {
+        resultado.classList.remove('hidden');
+        resultado.innerHTML = `
+          <div class="text-red-600 font-semibold">
+            ❌ Error al cargar el historial
+          </div>
+        `;
+      }
+    } finally {
+      btnBuscar.textContent = '🔍 Buscar';
+      btnBuscar.removeAttribute('disabled');
+    }
+  });
+</script>
