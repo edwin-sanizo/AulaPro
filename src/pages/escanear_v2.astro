@@ -49,7 +49,7 @@ const { data: sesion } = await supabase
   .eq("id", sessionId)
   .single();
 
-  const asignacion = sesion?.v2_teacher_assignments as any;
+const asignacion = sesion?.v2_teacher_assignments as any;
 
 // 6️⃣ Si no existe la sesión, redirigir
 if (!sesion || asignacion?.teacher_id !== profesor?.id) {
@@ -189,12 +189,15 @@ const nombreUltimo = ultimoEstudiante
     "sessionId",
   );
   const btnFinalizar = document.getElementById("btnFinalizar");
-  const btnConfirmarResumen = document.getElementById("btnConfirmarResumen");
+  const btnConfirmarResumen = document.getElementById("btnConfirmarResumen") as HTMLButtonElement | null;
 
-  // ✅ Click en "Finalizar Asistencia"
+
+    // ✅ Click en "Finalizar Asistencia"
   btnFinalizar?.addEventListener("click", () => {
     // ✅ Ocultar botones ANTES de disparar el evento
-    const btnAsistenciaManual = document.getElementById("btnAsistenciaManual");
+    const btnAsistenciaManual = document.getElementById(
+      "btnAsistenciaManual",
+    );
     const contador = document.getElementById("contador");
     const estado = document.getElementById("estado");
     const panelUltimoAlumno = document.getElementById("panelUltimoAlumno");
@@ -205,9 +208,7 @@ const nombreUltimo = ultimoEstudiante
     if (panelUltimoAlumno) panelUltimoAlumno.style.display = "none";
 
     // ✅ Deshabilitar el botón Finalizar
-    const btnFinalizar = document.getElementById(
-      "btnFinalizar",
-    ) as HTMLButtonElement | null;
+    const btnFinalizar = document.getElementById("btnFinalizar") as HTMLButtonElement | null;
     if (btnFinalizar) {
       btnFinalizar.disabled = true;
       btnFinalizar.classList.add("opacity-50", "cursor-not-allowed");
@@ -222,102 +223,106 @@ const nombreUltimo = ultimoEstudiante
     );
   });
 
-  // ✅ Click en "Confirmar"
-  btnConfirmarResumen?.addEventListener('click', () => {
-  const btn = btnConfirmarResumen as HTMLButtonElement;
-  
-  if (btn.disabled) return;
+    // ✅ Click en "Confirmar"
+  btnConfirmarResumen?.addEventListener("click", () => {
+    const btn = btnConfirmarResumen;
 
-  btn.disabled = true;
-  btn.classList.add('opacity-50', 'cursor-not-allowed');
-  btn.textContent = '⏳ Procesando...';
+    if (btn.disabled) return;
 
-  // ✅ Tipo correcto para el timeout
-  let timeoutRespaldo: ReturnType<typeof setTimeout> | null = null;
+    btn.disabled = true;
+    btn.classList.add("opacity-50", "cursor-not-allowed");
+    btn.textContent = "⏳ Procesando...";
 
-  const restaurarBoton = () => {
-    if (timeoutRespaldo) {
-      clearTimeout(timeoutRespaldo);
-      timeoutRespaldo = null;
-    }
-    btn.disabled = false;
-    btn.classList.remove('opacity-50', 'cursor-not-allowed');
-    btn.textContent = 'Confirmar';
-  };
+    // ✅ Tipo correcto para el timeout
+    let timeoutRespaldo: any = null;
 
-  // ✅ Mostrar confirmación
-  toast.warning('⚠️ ¿Estás seguro de finalizar la asistencia?', {
-    description: 'Esta acción cerrará la sesión y no se podrán registrar más asistencias.',
-    duration: 10000,
-    cancel: {
-      label: '❌ Cancelar',
-      onClick: () => {
-        restaurarBoton();
-        toast.info('✅ Operación cancelada');
+    const restaurarBoton = () => {
+      if (timeoutRespaldo) {
+        clearTimeout(timeoutRespaldo);
+        timeoutRespaldo = null;
       }
-    },
-    action: {
-      label: '✅ Sí, finalizar',
-      onClick: async () => {
-        try {
-          const { error: cerrarError } = await supabase
-            .from('v2_attendance_sessions')
-            .update({
-              status: 'closed',
-              closed_at: new Date().toISOString()
-            })
-            .eq('id', sessionId);
+      btn.disabled = false;
+      btn.classList.remove("opacity-50", "cursor-not-allowed");
+      btn.textContent = "Confirmar";
+    };
 
-          if (cerrarError) {
-            console.error('Error cerrando sesión:', cerrarError);
-            toast.error('❌ Error al finalizar la asistencia');
-            restaurarBoton();
-            return;
-          }
-
-          // ✅ Ocultar elementos
-          const panelResumen = document.getElementById('panelResumen');
-          const panelUltimoAlumno = document.getElementById('panelUltimoAlumno');
-          const estado = document.getElementById('estado');
-          const contador = document.getElementById('contador');
-          const btnFinalizar = document.getElementById('btnFinalizar');
-          const btnAsistenciaManual = document.getElementById('btnAsistenciaManual');
-
-          if (panelResumen) panelResumen.style.display = 'none';
-          if (panelUltimoAlumno) panelUltimoAlumno.style.display = 'none';
-          if (estado) estado.style.display = 'none';
-          if (contador) contador.style.display = 'none';
-          if (btnFinalizar) btnFinalizar.style.display = 'none';
-          if (btnAsistenciaManual) btnAsistenciaManual.style.display = 'none';
-
-          const contenido = document.getElementById('contenidoResumen');
-          if (contenido) {
-            contenido.innerHTML = `
-              <div class="text-green-600 font-bold text-xl text-center">
-                ✅ Asistencia finalizada correctamente
-              </div>
-            `;
-          }
-
-          toast.success('✅ Asistencia finalizada correctamente');
-        } catch (e) {
-          console.error('Error Confirmar:', e);
-          toast.error('❌ Error al finalizar la asistencia');
+    // ✅ Mostrar confirmación
+    toast.warning("⚠️ ¿Estás seguro de finalizar la asistencia?", {
+      description:
+        "Esta acción cerrará la sesión y no se podrán registrar más asistencias.",
+      duration: 10000,
+      cancel: {
+        label: "❌ Cancelar",
+        onClick: () => {
           restaurarBoton();
-        }
+          toast.info("✅ Operación cancelada");
+        },
+      },
+      action: {
+        label: "✅ Sí, finalizar",
+        onClick: async () => {
+          try {
+            const { error: cerrarError } = await supabase
+              .from("v2_attendance_sessions")
+              .update({
+                status: "closed",
+                closed_at: new Date().toISOString(),
+              })
+              .eq("id", sessionId);
+
+            if (cerrarError) {
+              console.error("Error cerrando sesión:", cerrarError);
+              toast.error("❌ Error al finalizar la asistencia");
+              restaurarBoton();
+              return;
+            }
+
+            // ✅ Ocultar elementos
+            const panelResumen = document.getElementById("panelResumen");
+            const panelUltimoAlumno =
+              document.getElementById("panelUltimoAlumno");
+            const estado = document.getElementById("estado");
+            const contador = document.getElementById("contador");
+            const btnFinalizar = document.getElementById("btnFinalizar");
+            const btnAsistenciaManual = document.getElementById(
+              "btnAsistenciaManual",
+            );
+
+            if (panelResumen) panelResumen.style.display = "none";
+            if (panelUltimoAlumno) panelUltimoAlumno.style.display = "none";
+            if (estado) estado.style.display = "none";
+            if (contador) contador.style.display = "none";
+            if (btnFinalizar) btnFinalizar.style.display = "none";
+            if (btnAsistenciaManual)
+              btnAsistenciaManual.style.display = "none";
+
+            const contenido = document.getElementById("contenidoResumen");
+            if (contenido) {
+              contenido.innerHTML = `
+            <div class="text-green-600 font-bold text-xl text-center">
+              ✅ Asistencia finalizada correctamente
+            </div>
+          `;
+            }
+
+            toast.success("✅ Asistencia finalizada correctamente");
+          } catch (e) {
+            console.error("Error Confirmar:", e);
+            toast.error("❌ Error al finalizar la asistencia");
+            restaurarBoton();
+          }
+        },
+      },
+      onDismiss: () => {
+        restaurarBoton();
+      },
+    });
+
+    // ✅ FORZAR restauración después del timeout
+    timeoutRespaldo = setTimeout(() => {
+      if (btn.disabled) {
+        restaurarBoton();
       }
-    },
-    onDismiss: () => {
-      restaurarBoton();
-    }
+    }, 10500);
   });
-
-  // ✅ FORZAR restauración después del timeout
-  timeoutRespaldo = setTimeout(() => {
-    if (btn.disabled) {
-      restaurarBoton();
-    }
-  }, 10500);
-});
-
 </script>

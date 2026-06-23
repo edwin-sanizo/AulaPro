@@ -1,13 +1,16 @@
 ---
+// src/components/QrScannerV2.astro
 const { sessionId } = Astro.props;
 ---
 
 <div id="qr-scanner-container" data-session-id={sessionId}>
-  <div
-    id="reader"
-    class="w-full max-w-sm mx-auto border-2 border-blue-800 rounded-xl overflow-hidden"
-  >
-  </div>
+  <!-- ✅ qr-scanner usa un elemento <video> -->
+  <video
+    id="qr-video"
+    class="w-full max-w-sm mx-auto border-2 border-blue-800 rounded-xl overflow-hidden bg-black"
+    playsinline
+    autoplay
+  ></video>
 
   <div
     id="resultado"
@@ -17,64 +20,157 @@ const { sessionId } = Astro.props;
   </div>
 </div>
 
- <script>
-  import { Html5Qrcode } from 'html5-qrcode';
+<script>
+  // ✅ Importar qr-scanner (solo en cliente)
+  import QrScanner from 'qr-scanner';
+  import type QrScannerType from 'qr-scanner'; // ✅ Importar el tipo
   import { supabase } from '../lib/supabase-client';
 
-  // ✅ Obtener sessionId desde el atributo data
   const container = document.getElementById('qr-scanner-container');
   const sessionId = container?.dataset.sessionId;
 
-  console.log('🔍 QrScannerV2 - sessionId:', sessionId);
-
   let puedeEscanear = true;
-  let html5QrCode: Html5Qrcode | null = null;
+  let qrScanner: QrScannerType | null = null;
+  let scanTimeout = null;
+  let currentCourseId: any = null;
 
+  // ✅ AGREGAR ESTA FUNCIÓN COMPLETA
+  async function getCurrentCourseId() {
+    if (currentCourseId) return currentCourseId;
+    
+    try {
+      const { data: sesion } = await supabase
+        .from('v2_attendance_sessions')
+        .select('teacher_assignment_id')
+        .eq('id', sessionId)
+        .single();
+
+      if (!sesion) return null;
+
+      const { data: asignacion } = await supabase
+        .from('v2_teacher_assignments')
+        .select('course_id')
+        .eq('id', sesion.teacher_assignment_id)
+        .single();
+
+      currentCourseId = asignacion?.course_id || null;
+      return currentCourseId;
+    } catch (error) {
+      console.error('Error obteniendo course_id:', error);
+      return null;
+    }
+  }
+
+  // ✅ Función para actualizar el contador
+  async function actualizarContador() {
+    try {
+      if (!sessionId) return;
+
+      const { data } = await supabase
+        .from('v2_attendance')
+        .select('status')
+        .eq('session_id', sessionId);
+
+      const asistentes =
+        data?.filter((a) => a.status === 'Presente' || a.status === 'Retraso')
+          .length || 0;
+
+      const contador = document.getElementById('contador');
+      if (contador) {
+        contador.textContent = `👥 Asistentes: ${asistentes}`;
+      }
+    } catch (error) {
+      console.error('Error actualizando contador:', error);
+    }
+  }
+
+  // ✅ Función para guardar asistencia
+  async function guardarAsistencia(studentId: string, studentName: string, estadoSeleccionado: string) {
+    try {
+      const { error } = await supabase
+        .from("v2_attendance")
+        .insert([
+          {
+            session_id: sessionId,
+            student_id: studentId,
+            status: estadoSeleccionado,
+          },
+        ]);
+
+      if (error) {
+        console.error('❌ Error guardando asistencia');
+        return;
+      }
+
+      await actualizarContador();
+
+      const titulo = document.getElementById('tituloUltimoAlumno');
+      const ultimoAlumno = document.getElementById('ultimoAlumno');
+
+      if (titulo && ultimoAlumno) {
+        titulo.classList.remove('hidden');
+        ultimoAlumno.textContent = studentName;
+      }
+
+      document.dispatchEvent(
+        new CustomEvent('qr-scanned', {
+          detail: { studentName },
+        })
+      );
+
+      const resultado = document.getElementById('resultado');
+      if (resultado) {
+        resultado.innerHTML = `
+          <div class="text-green-600 font-bold">✅ ${estadoSeleccionado}</div>
+          <div class="mt-2 text-lg">${studentName}</div>
+        `;
+      }
+
+      setTimeout(() => {
+        puedeEscanear = true;
+        const estado = document.getElementById('estado');
+        if (estado) estado.textContent = '📷 Esperando QR...';
+        if (resultado) {
+          resultado.innerHTML = '📷 Cámara iniciada. Apunte al código QR.';
+        }
+      }, 2000);
+    } catch (error) {
+      console.error('❌ Error al guardar asistencia:', error);
+    }
+  }
+
+  // ✅ Iniciar cámara con qr-scanner
   async function iniciarCamara() {
-
-    console.log("Html5Qrcode:", Html5Qrcode);
+    const video = document.getElementById('qr-video') as HTMLVideoElement;
     const resultado = document.getElementById('resultado') as HTMLDivElement | null;
 
     if (!sessionId) {
       if (resultado) {
-        resultado.innerHTML = `
-          <div class="text-red-600 font-bold">❌ No hay sesión activa</div>
-        `;
+        resultado.innerHTML = `<div class="text-red-600 font-bold">❌ No hay sesión activa</div>`;
       }
       return;
     }
 
     try {
-      // ✅ Importar dinámicamente html5-qrcode
-      // const { Html5Qrcode } = await import('html5-qrcode');
+      // ✅ Verificar que el elemento video existe
+      if (!video) {
+        throw new Error('No se encontró el elemento video');
+      }
 
-      // // ✅ Verificar que está definido
-      // if (!Html5Qrcode) {
-      //   throw new Error('La librería html5-qrcode no está disponible');
-      // }
-
-      html5QrCode = new Html5Qrcode('reader');
-       console.log('✅ Scanner creado correctamente');
-
-      await html5QrCode.start(
-        { facingMode: 'environment' },
-        {
-          fps: 10,
-          qrbox: {
-            width: 250,
-            height: 250,
-          },
-        },
-        async (decodedText: string) => {
+      // ✅ Crear el scanner
+      qrScanner = new QrScanner(
+        video,
+        async (result) => {
+          // ✅ Escaneo exitoso
           if (!puedeEscanear) return;
           puedeEscanear = false;
 
-          const studentCodigo = decodedText;
+          const studentCodigo = result.data;
 
           // ✅ Verificar que el código QR sea de un estudiante
           const { data: student, error: errorStudent } = await supabase
             .from('v2_students')
-            .select('id, first_name, last_name')
+            .select('id, first_name, last_name, course_id')
             .eq('code', studentCodigo)
             .single();
 
@@ -88,6 +184,23 @@ const { sessionId } = Astro.props;
             setTimeout(() => {
               puedeEscanear = true;
             }, 2000);
+            return;
+          }
+
+          // ✅ NUEVA VALIDACIÓN: Verificar que el estudiante pertenezca al curso
+          const courseId = await getCurrentCourseId();
+
+          if (courseId && student.course_id !== courseId) {
+            if (resultado) {
+              resultado.innerHTML = `
+                <div class="text-red-600 font-bold">❌ Estudiante no pertenece a este curso</div>
+                <div class="text-sm text-gray-500 mt-2">${student.first_name} ${student.last_name}</div>
+                <div class="text-xs text-gray-400">Código: ${studentCodigo}</div>
+              `;
+            }
+            setTimeout(() => {
+              puedeEscanear = true;
+            }, 3000);
             return;
           }
 
@@ -127,13 +240,13 @@ const { sessionId } = Astro.props;
               <div class="flex gap-2 justify-center mt-4">
                 <button
                   id="btnPresente"
-                  class="bg-green-600 text-white px-4 py-2 rounded-lg"
+                  class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
                 >
                   Presente
                 </button>
                 <button
                   id="btnRetraso"
-                  class="bg-yellow-500 text-white px-4 py-2 rounded-lg"
+                  class="bg-yellow-500 text-white px-4 py-2 rounded-lg hover:bg-yellow-600 transition-colors"
                 >
                   Retraso
                 </button>
@@ -143,135 +256,55 @@ const { sessionId } = Astro.props;
             const btnPresente = document.getElementById('btnPresente');
             const btnRetraso = document.getElementById('btnRetraso');
 
-            async function guardarAsistencia(estadoSeleccionado: string) {
-              const response =
-              await fetch(
-                "/api/attendance",
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type":
-                      "application/json"
-                  },
-                  body: JSON.stringify({
-                    sessionId,
-                    studentId,
-                    status:
-                      estadoSeleccionado
-                  })
-                }
-              );
+            btnPresente?.addEventListener('click', () => {
+              guardarAsistencia(studentId, nombre, 'Presente');
+            });
 
-              if (!response.ok) {
-                console.error(
-                  "❌ Error guardando asistencia"
-                );
-
-                return;
-              }
-              // const { error } = await supabase
-              //   .from('v2_attendance')
-              //   .insert([
-              //     {
-              //       session_id: sessionId,
-              //       student_id: studentId,
-              //       status: estadoSeleccionado,
-              //     },
-              //   ]);
-
-              // if (error) {
-              //   console.log('❌ Error guardando asistencia:', error);
-              //   return;
-              // }
-
-              await actualizarContador();
-
-              const titulo = document.getElementById('tituloUltimoAlumno');
-              const ultimoAlumno = document.getElementById('ultimoAlumno');
-
-              if (titulo && ultimoAlumno) {
-                titulo.classList.remove('hidden');
-                ultimoAlumno.textContent = nombre;
-              }
-
-              // ✅ Disparar evento para actualizar la UI externa
-              document.dispatchEvent(
-                new CustomEvent('qr-scanned', {
-                  detail: { student, nombre },
-                })
-              );
-
-              const estado = document.getElementById('estado');
-              if (estado) {
-                estado.textContent = '✅ Asistencia registrada';
-              }
-
-              if (resultado) {
-                resultado.innerHTML = `
-                  <div class="text-green-600 font-bold">✅ ${estadoSeleccionado}</div>
-                  <div class="mt-2 text-lg">${nombre}</div>
-                `;
-              }
-
-              setTimeout(() => {
-                puedeEscanear = true;
-                if (estado) {
-                  estado.textContent = '📷 Esperando QR...';
-                }
-                if (resultado) {
-                  resultado.innerHTML = '📷 Cámara iniciada. Apunte al código QR.';
-                }
-              }, 2000);
-            }
-
-            btnPresente?.addEventListener('click', () => guardarAsistencia('Presente'));
-            btnRetraso?.addEventListener('click', () => guardarAsistencia('Retraso'));
+            btnRetraso?.addEventListener('click', () => {
+              guardarAsistencia(studentId, nombre, 'Retraso');
+            });
           }
         },
-        () => {
-          // Ignorar errores de lectura
+        {
+          // ✅ Configuración del scanner
+          maxScansPerSecond: 5,
+          highlightScanRegion: true,
+          highlightCodeOutline: true,
+          preferredCamera: 'environment',
+          returnDetailedScanResult: true,
         }
       );
+
+      // ✅ Iniciar el scanner
+      await qrScanner.start();
 
       if (resultado) {
         resultado.innerHTML = '📷 Cámara iniciada. Apunte al código QR.';
       }
+
     } catch (error) {
       console.error('❌ Error al iniciar cámara:', error);
       if (resultado) {
+        const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
         resultado.innerHTML = `
           <div class="text-red-600 font-bold">❌ No se pudo acceder a la cámara</div>
+          <div class="text-sm text-gray-500 mt-2">${errorMessage || ''}</div>
           <button
             id="btnReintentar"
-            class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg"
+            class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
           >
             🔄 Reintentar
           </button>
         `;
-        document.getElementById('btnReintentar')?.addEventListener('click', iniciarCamara);
+        document.getElementById('btnReintentar')?.addEventListener('click', () => {
+          // ✅ Reiniciar el scanner
+          if (qrScanner) {
+            qrScanner.destroy();
+            qrScanner = null;
+          }
+          setTimeout(iniciarCamara, 500);
+        });
       }
-    }
-  }
-
-  async function actualizarContador() {
-    try {
-      if (!sessionId) return;
-
-      const { data } = await supabase
-        .from('v2_attendance')
-        .select('status')
-        .eq('session_id', sessionId);
-
-      const asistentes =
-        data?.filter((a) => a.status === 'Presente' || a.status === 'Retraso')
-          .length || 0;
-
-      const contador = document.getElementById('contador');
-      if (contador) {
-        contador.textContent = `👥 Asistentes: ${asistentes}`;
-      }
-    } catch (error) {
-      console.error('Error actualizando contador:', error);
     }
   }
 
@@ -281,16 +314,17 @@ const { sessionId } = Astro.props;
     const { sessionId: sessionIdFromEvent } = customEvent.detail || {};
 
     try {
-      // ✅ Detener la cámara
-      if (html5QrCode) {
-        await html5QrCode.stop();
-        await html5QrCode.clear();
+      const customEvent = event as CustomEvent;
+      const { sessionId: sessionIdFromEvent } = customEvent.detail || {};
+      // ✅ Detener y destruir el scanner
+      if (qrScanner) {
+        qrScanner.destroy();
+        qrScanner = null;
       }
 
-      const reader = document.getElementById('reader');
-      if (reader) {
-        reader.innerHTML = '';
-        reader.style.display = 'none';
+      const video = document.getElementById('qr-video');
+      if (video) {
+        video.style.display = 'none';
       }
 
       const sessionIdToUse = sessionIdFromEvent || sessionId;
@@ -301,55 +335,63 @@ const { sessionId } = Astro.props;
       }
 
       // ✅ Obtener el teacherAssignmentId desde la sesión
-    const { data: sesion } = await supabase
-      .from('v2_attendance_sessions')
-      .select('teacher_assignment_id')
-      .eq('id', sessionIdFromEvent || sessionId)
-      .single();
+      const { data: sesion, error: sessionError } = await supabase
+        .from('v2_attendance_sessions')
+        .select('teacher_assignment_id')
+        .eq('id', sessionIdToUse)
+        .single();
 
-    if (!sesion) {
-      console.error('❌ No se encontró la sesión');
-      return;
-    }
+      if (sessionError) {
+        console.error('❌ Error al obtener la sesión: ', sessionError);
+        return;
+      }
 
-    const teacherAssignmentId = sesion.teacher_assignment_id;
+      if(!sesion) {
+        console.error('❌ No se encontró la sesión');
+        return;
+      }
 
-    // ✅ Obtener el course_id de la asignación
-    const { data: asignacion } = await supabase
-      .from('v2_teacher_assignments')
-      .select('course_id')
-      .eq('id', teacherAssignmentId)
-      .single();
+      const teacherAssignmentId = sesion.teacher_assignment_id;
 
-    if (!asignacion) {
-      console.error('❌ No se encontró la asignación');
-      return;
-    }
+      // ✅ Obtener el course_id de la asignación
+      const { data: asignacion, error: asignacionError } = await supabase
+        .from('v2_teacher_assignments')
+        .select('course_id')
+        .eq('id', teacherAssignmentId)
+        .single();
 
-    // ✅ Obtener SOLO los estudiantes del curso
-    const { data: students } = await supabase
-      .from('v2_students')
-      .select('id, code, first_name, last_name')
-      .eq('course_id', asignacion.course_id)  // 👈 Filtro clave
-      .order('last_name');
+      if (asignacionError) {
+        console.error('❌ Error al obtener asignación:', asignacionError);
+        return;
+      }
 
-    // ✅ Obtener asistencias de la sesión
-    const { data: asistenciaHoy } = await supabase
-      .from('v2_attendance')
-      .select('student_id, status')
-      .eq('session_id', sessionIdFromEvent || sessionId);
+      if (!asignacion) {
+        console.error('❌ No se encontró la asignación');
+        return;
+      }
 
-      // // ✅ Total estudiantes
-      // const { data: students } = await supabase
-      //   .from('v2_students')
-      //   .select('id, code, first_name, last_name')
-      //   .order('last_name');
+      // ✅ Obtener SOLO los estudiantes del curso
+      const { data: students, error: studentsError } = await supabase
+        .from('v2_students')
+        .select('id, code, first_name, last_name')
+        .eq('course_id', asignacion.course_id)
+        .order('last_name');
 
-      // // ✅ Asistencia de la sesión actual
-      // const { data: asistenciaHoy } = await supabase
-      //   .from('v2_attendance')
-      //   .select('student_id, status')
-      //   .eq('session_id', sessionIdToUse);
+      if (studentsError) {
+        console.error('❌ Error al obtener estudiantes:', studentsError);
+        return;
+      }
+
+      // ✅ Obtener asistencias de la sesión
+      const { data: asistenciaHoy, error: asistenciaError } = await supabase
+        .from('v2_attendance')
+        .select('student_id, status')
+        .eq('session_id', sessionIdToUse);
+
+      if (asistenciaError) {
+        console.error('❌ Error al obtener asistencias:', asistenciaError);
+        return;
+      }
 
       const presentes =
         asistenciaHoy?.filter((a) => a.status === 'Presente').length || 0;
@@ -360,13 +402,11 @@ const { sessionId } = Astro.props;
       const licencias =
         asistenciaHoy?.filter((a) => a.status === 'Licencia').length || 0;
 
-      // ✅ Calcular ausentes
       const estudiantesRegistrados = new Set(
         asistenciaHoy?.map((a) => a.student_id) || []
       );
 
       const asistentes = presentes + retrasos;
-
       const ausentes =
         students?.filter((s) => !estudiantesRegistrados.has(s.id)) || [];
 
@@ -394,6 +434,8 @@ const { sessionId } = Astro.props;
           </div>
         `;
         panelResumen.classList.remove('hidden');
+      } else {
+        console.error('❌ No se encontraron panelResumen o contenidoResumen');
       }
 
       // ✅ Ocultar elementos
@@ -401,26 +443,12 @@ const { sessionId } = Astro.props;
       const estado = document.getElementById('estado');
       const btnAsistenciaManual = document.getElementById('btnAsistenciaManual');
       const contador = document.getElementById('contador');
+      const btnFinalizar = document.getElementById('btnFinalizar');
 
-      if (panelUltimoAlumno) {
-        panelUltimoAlumno.style.display = 'none';
-      }
-
-      if (estado) {
-        estado.style.display = 'none';
-      }
-
+      if (panelUltimoAlumno) panelUltimoAlumno.style.display = 'none';
+      if (estado) estado.style.display = 'none';
       if (btnAsistenciaManual) btnAsistenciaManual.style.display = 'none';
-      
       if (contador) contador.style.display = 'none';
-
-      // ✅ Deshabilitar btnFinalizar (en lugar de ocultar)
-      const btnFinalizar = document.getElementById('btnFinalizar') as HTMLButtonElement | null;
-      // if (btnFinalizar) {
-      //   btnFinalizar.disabled = true;
-      //   btnFinalizar.classList.add('opacity-50', 'cursor-not-allowed');
-      //   btnFinalizar.textContent = '⏳ Finalizando...';
-      // }
       if (btnFinalizar) btnFinalizar.style.display = 'none';
 
       const resultado = document.getElementById('resultado');
@@ -442,27 +470,29 @@ const { sessionId } = Astro.props;
 
   // ✅ Actualizar contador cada 10 segundos
   setInterval(actualizarContador, 10000);
+
+  // ✅ Limpiar el scanner al cerrar la página
+  window.addEventListener('beforeunload', () => {
+    if (qrScanner) {
+      qrScanner.destroy();
+      qrScanner = null;
+    }
+  });
 </script>
 
-
 <style>
-  #reader {
+  #qr-video {
     min-height: 250px;
     background: #000;
     border-radius: 12px;
     overflow: hidden;
   }
 
-  /* ✅ Ocupa todo el espacio del contenedor */
-  #reader video {
+  /* ✅ El video ocupa todo el contenedor */
+  #qr-video {
     width: 100% !important;
     height: 100% !important;
     object-fit: cover;
     display: block;
-  }
-
-  /* ✅ Oculta elementos adicionales que crean espacio */
-  #reader canvas {
-    display: none !important;
   }
 </style>

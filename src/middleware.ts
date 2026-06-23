@@ -25,6 +25,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const publicRoutes = [
     "/login",
     "/api/login",
+    "/api/logout",
     "/favicon.ico"
   ];
 
