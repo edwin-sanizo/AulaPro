@@ -75,18 +75,43 @@ const studentsWithQR = await Promise.all(
 );
 
 // 🔟 Obtener materia asignada (para mostrar en el título)
-const { data: subjectData } = await supabase
+// const { data: subjectData, error: subjectError} = await supabase
+//   .from("v2_teacher_assignments")
+//   .select(`
+//     subject_id,
+//     v2_subjects (
+//       name
+//     )
+//   `)
+//   .eq("teacher_id", teacher.id)
+//   .eq("course_id", courseId)
+//   .single();
+
+// const subjectName = subjectData?.v2_subjects?.[0]?.name || 'Materia no asignada';
+// ✅ Obtener materia de forma directa
+let subjectName = 'Materia no asignada';
+
+// 1. Obtener el subject_id de la asignación
+const { data: assignmentData } = await supabase
   .from("v2_teacher_assignments")
-  .select(`
-    v2_subjects (
-      name
-    )
-  `)
+  .select("subject_id")
   .eq("teacher_id", teacher.id)
   .eq("course_id", courseId)
   .single();
 
-const subjectName = subjectData?.v2_subjects?.[0]?.name || 'Materia no asignada';
+// 2. Si hay subject_id, obtener el nombre de la materia
+if (assignmentData?.subject_id) {
+  const { data: subject } = await supabase
+    .from("v2_subjects")
+    .select("name")
+    .eq("id", assignmentData.subject_id)
+    .single();
+  
+  if (subject?.name) {
+    subjectName = subject.name;
+  }
+}
+
 const courseName = `${course.level || ''} ${course.parallel || ''}`.trim() || 'Curso sin nombre';
 ---
 
